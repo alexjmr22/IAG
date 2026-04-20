@@ -31,8 +31,12 @@ runs/
 
 # Datasets (large binary files)
 ArtBench-10/
+data/
 *.pkl
 *.pickle
+
+# Results / generated outputs
+results/
 
 # Logs
 *.log
