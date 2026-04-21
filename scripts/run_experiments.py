@@ -7,35 +7,44 @@ from pathlib import Path
 # --- THE MIGHTY GRID SEARCH ORCHESTRATOR --- #
 
 EXPERIMENTS = {
-    '1': [ # PC 1 VAEs
-        {'id': 'prod_vae', 'target': 'VAE', 'env': {'RUN_PROFILE':'PROD'}},
-        {'id': 'vae_lat16', 'target': 'VAE', 'env': {'RUN_PROFILE':'DEV', 'VAE_LATENT_DIM': '16'}},
-        {'id': 'vae_lat32', 'target': 'VAE', 'env': {'RUN_PROFILE':'DEV', 'VAE_LATENT_DIM': '32'}},
+    '1': [ # PC 1 — VAE feature-engineering sweep
+        {'id': 'default_vae', 'target': 'VAE', 'env': {'RUN_PROFILE':'DEV'}},
+        {'id': 'vae_lat16',  'target': 'VAE', 'env': {'RUN_PROFILE':'DEV', 'VAE_LATENT_DIM': '16'}},
+        {'id': 'vae_lat32',  'target': 'VAE', 'env': {'RUN_PROFILE':'DEV', 'VAE_LATENT_DIM': '32'}},
+        {'id': 'vae_lat64',  'target': 'VAE', 'env': {'RUN_PROFILE':'DEV', 'VAE_LATENT_DIM': '64'}},
+        {'id': 'vae_lat128', 'target': 'VAE', 'env': {'RUN_PROFILE':'DEV', 'VAE_LATENT_DIM': '128'}},
         {'id': 'vae_lat256', 'target': 'VAE', 'env': {'RUN_PROFILE':'DEV', 'VAE_LATENT_DIM': '256'}},
-        {'id': 'vae_AE_ablation', 'target': 'VAE', 'env': {'RUN_PROFILE':'DEV', 'VAE_BETA': '0.0'}},
+        {'id': 'vae_beta0',  'target': 'VAE', 'env': {'RUN_PROFILE':'DEV', 'VAE_BETA': '0.0'}},
         {'id': 'vae_beta01', 'target': 'VAE', 'env': {'RUN_PROFILE':'DEV', 'VAE_BETA': '0.1'}},
-        {'id': 'vae_beta20', 'target': 'VAE', 'env': {'RUN_PROFILE':'DEV', 'VAE_BETA': '2.0'}},
-        {'id': 'vae_lr1e4', 'target': 'VAE', 'env': {'RUN_PROFILE':'DEV', 'VAE_LR': '1e-4'}},
-        {'id': 'vae_lr5e3', 'target': 'VAE', 'env': {'RUN_PROFILE':'DEV', 'VAE_LR': '5e-3'}}
+        {'id': 'vae_beta05', 'target': 'VAE', 'env': {'RUN_PROFILE':'DEV', 'VAE_BETA': '0.5'}},
+        {'id': 'vae_beta2',  'target': 'VAE', 'env': {'RUN_PROFILE':'DEV', 'VAE_BETA': '2.0'}},
+        {'id': 'vae_lr5e3',  'target': 'VAE', 'env': {'RUN_PROFILE':'DEV', 'VAE_LR': '5e-3'}},
+        {'id': 'vae_lr1e3',  'target': 'VAE', 'env': {'RUN_PROFILE':'DEV', 'VAE_LR': '1e-3'}},
+        {'id': 'vae_lr5e4',  'target': 'VAE', 'env': {'RUN_PROFILE':'DEV', 'VAE_LR': '5e-4'}},
+        {'id': 'vae_lr1e4',  'target': 'VAE', 'env': {'RUN_PROFILE':'DEV', 'VAE_LR': '1e-4'}}
     ],
-    '2': [ # PC 2 DCGAN Heavies
-        {'id': 'prod_dcgan', 'target': 'DCGAN', 'env': {'RUN_PROFILE':'PROD'}},
-        {'id': 'dcgan_adam09', 'target': 'DCGAN', 'env': {'RUN_PROFILE': 'DEV', 'DCGAN_BETA1': '0.9'}},
-        {'id': 'dcgan_width128', 'target': 'DCGAN', 'env': {'RUN_PROFILE': 'DEV', 'DCGAN_NGF': '128', 'DCGAN_NDF': '128'}},
-        {'id': 'dcgan_width32', 'target': 'DCGAN', 'env': {'RUN_PROFILE': 'DEV', 'DCGAN_NGF': '32', 'DCGAN_NDF': '32'}},
-        {'id': 'dcgan_lat32', 'target': 'DCGAN', 'env': {'RUN_PROFILE': 'DEV', 'DCGAN_LATENT': '32'}},
-        {'id': 'dcgan_lr_Dfst', 'target': 'DCGAN', 'env': {'RUN_PROFILE': 'DEV', 'DCGAN_LR_D': '1e-3', 'DCGAN_LR_G': '2e-4'}},
-        {'id': 'dcgan_lr_slow', 'target': 'DCGAN', 'env': {'RUN_PROFILE': 'DEV', 'DCGAN_LR': '1e-4'}}
+    '2': [ # PC 2 — DCGAN sweeps
+        {'id': 'default_dcgan',    'target': 'DCGAN', 'env': {'RUN_PROFILE':'DEV'}},
+        {'id': 'dcgan_lat32',   'target': 'DCGAN', 'env': {'RUN_PROFILE':'DEV', 'DCGAN_LATENT': '32'}},
+        {'id': 'dcgan_lat100',  'target': 'DCGAN', 'env': {'RUN_PROFILE':'DEV', 'DCGAN_LATENT': '100'}},
+        {'id': 'dcgan_lat256',  'target': 'DCGAN', 'env': {'RUN_PROFILE':'DEV', 'DCGAN_LATENT': '256'}},
+        {'id': 'dcgan_ngf32',   'target': 'DCGAN', 'env': {'RUN_PROFILE':'DEV', 'DCGAN_NGF': '32',  'DCGAN_NDF': '32'}},
+        {'id': 'dcgan_ngf64',   'target': 'DCGAN', 'env': {'RUN_PROFILE':'DEV', 'DCGAN_NGF': '64',  'DCGAN_NDF': '64'}},
+        {'id': 'dcgan_ngf128',  'target': 'DCGAN', 'env': {'RUN_PROFILE':'DEV', 'DCGAN_NGF': '128', 'DCGAN_NDF': '128'}},
+        {'id': 'dcgan_beta09',  'target': 'DCGAN', 'env': {'RUN_PROFILE':'DEV', 'DCGAN_BETA1': '0.9'}},
+        {'id': 'dcgan_lr1e3',   'target': 'DCGAN', 'env': {'RUN_PROFILE':'DEV', 'DCGAN_LR': '1e-3'}},
+        {'id': 'dcgan_lr2e4',   'target': 'DCGAN', 'env': {'RUN_PROFILE':'DEV', 'DCGAN_LR': '2e-4'}}
     ],
-    '3': [ # PC 3 DIFFUSION Master
-        {'id': 'prod_diff', 'target': 'Diffusion', 'env': {'RUN_PROFILE':'PROD'}},
-        {'id': 'diff_T100', 'target': 'Diffusion', 'env': {'RUN_PROFILE':'DEV', 'DIFF_T_STEPS': '100'}},
-        {'id': 'diff_T250', 'target': 'Diffusion', 'env': {'RUN_PROFILE':'DEV', 'DIFF_T_STEPS': '250'}},
-        {'id': 'diff_T500', 'target': 'Diffusion', 'env': {'RUN_PROFILE':'DEV', 'DIFF_T_STEPS': '500'}},
-        {'id': 'diff_ch32', 'target': 'Diffusion', 'env': {'RUN_PROFILE':'DEV', 'DIFF_CHANNELS': '32'}},
+    '3': [ # PC 3 — Diffusion sweeps
+        {'id': 'default_diff',  'target': 'Diffusion', 'env': {'RUN_PROFILE':'DEV'}},
+        {'id': 'diff_T100',  'target': 'Diffusion', 'env': {'RUN_PROFILE':'DEV', 'DIFF_T_STEPS': '100'}},
+        {'id': 'diff_T250',  'target': 'Diffusion', 'env': {'RUN_PROFILE':'DEV', 'DIFF_T_STEPS': '250'}},
+        {'id': 'diff_T500',  'target': 'Diffusion', 'env': {'RUN_PROFILE':'DEV', 'DIFF_T_STEPS': '500'}},
+        {'id': 'diff_ch32',  'target': 'Diffusion', 'env': {'RUN_PROFILE':'DEV', 'DIFF_CHANNELS': '32'}},
+        {'id': 'diff_ch64',  'target': 'Diffusion', 'env': {'RUN_PROFILE':'DEV', 'DIFF_CHANNELS': '64'}},
         {'id': 'diff_ch128', 'target': 'Diffusion', 'env': {'RUN_PROFILE':'DEV', 'DIFF_CHANNELS': '128'}},
-        {'id': 'diff_lr_1e3', 'target': 'Diffusion', 'env': {'RUN_PROFILE':'DEV', 'DIFF_LR': '1e-3'}},
-        {'id': 'diff_lr_2e5', 'target': 'Diffusion', 'env': {'RUN_PROFILE':'DEV', 'DIFF_LR': '2e-5'}}
+        {'id': 'diff_lr1e3', 'target': 'Diffusion', 'env': {'RUN_PROFILE':'DEV', 'DIFF_LR': '1e-3'}},
+        {'id': 'diff_lr2e5', 'target': 'Diffusion', 'env': {'RUN_PROFILE':'DEV', 'DIFF_LR': '2e-5'}}
     ]
 }
 
@@ -71,7 +80,6 @@ def main():
     for exp in pc_experiments:
         print(f"\n-------------------------------------------------------")
         print(f" \n\n🚀 EXPERIÊNCIA: {exp['id']}")
-        
         # Inject standard required environment variables
         exp_env = exp['env'].copy()
         exp_env['EXP_NAME'] = exp['id']

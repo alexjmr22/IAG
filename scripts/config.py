@@ -22,15 +22,16 @@ PROFILES = {
     },
     'DEV': {
         # Feature Engineering: moderate lengths to analyze image quality and intermediate metrics
-        'vae_epochs': 10,
-        'dcgan_epochs': 20,
-        'diffusion_epochs': 20,
+        'vae_epochs': 30,
+        'dcgan_epochs': 50,
+        'diffusion_epochs': 50,
         
         'use_subset': True,       # Use 20% subset for faster iterative cycle
         'save_samples': True,     # Save samples so you can see if it's learning (grid art)
         
-        'eval_samples': 1000,     # Enough to get a rough idea of FID
-        'eval_seeds': 2           # Do 2 seeds to see variance
+        # Stronger evaluation for feature engineering: more samples + seeds
+        'eval_samples': 2000,
+        'eval_seeds': 3
     },
     'PROD': {
         # Final Report: strict compliance with Project Prompt (Enunciado)
