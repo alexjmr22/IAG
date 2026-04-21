@@ -347,18 +347,50 @@ def generate_diffusion(n: int, seed: int) -> torch.Tensor:
 
 def compute_fid(real_u8: torch.Tensor, fake_u8: torch.Tensor) -> float:
     """FID no conjunto completo 5k vs 5k."""
-    fid = FrechetInceptionDistance(feature=2048, normalize=False).to(device)
-    fid.update(real_u8.to(device), real=True)
-    fid.update(fake_u8.to(device), real=False)
+    # If running on Apple MPS, compute metrics on CPU to avoid float64 MPS issues
+    run_on_cpu = (device.type == 'mps')
+
+    fid = FrechetInceptionDistance(feature=2048, normalize=False)
+    if run_on_cpu:
+        fid = fid.cpu()
+    else:
+        fid = fid.to(device)
+
+    # Normalize to float32 [0,1]
+    real = real_u8.float() / 255.0
+    fake = fake_u8.float() / 255.0
+
+    if not run_on_cpu:
+        real = real.to(device)
+        fake = fake.to(device)
+
+    fid.update(real, real=True)
+    fid.update(fake, real=False)
     return fid.compute().item()
 
 
 def compute_kid(real_u8: torch.Tensor, fake_u8: torch.Tensor,
                 n_subsets=KID_SUBSETS, subset_size=KID_SUBSET_SZ) -> tuple[float, float]:
     """KID: média e std em 50 subsets de tamanho 100."""
-    kid = KernelInceptionDistance(feature=2048, subset_size=subset_size, normalize=False).to(device)
-    kid.update(real_u8.to(device), real=True)
-    kid.update(fake_u8.to(device), real=False)
+    # If running on Apple MPS, compute metrics on CPU to avoid float64 MPS issues
+    run_on_cpu = (device.type == 'mps')
+
+    kid = KernelInceptionDistance(feature=2048, subset_size=subset_size, normalize=False)
+    if run_on_cpu:
+        kid = kid.cpu()
+    else:
+        kid = kid.to(device)
+
+    # Normalize to float32 [0,1]
+    real = real_u8.float() / 255.0
+    fake = fake_u8.float() / 255.0
+
+    if not run_on_cpu:
+        real = real.to(device)
+        fake = fake.to(device)
+
+    kid.update(real, real=True)
+    kid.update(fake, real=False)
     mean, std = kid.compute()
     return mean.item(), std.item()
 
