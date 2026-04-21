@@ -40,7 +40,9 @@ EXPERIMENTS = {
 }
 
 def run_script(script_path, extra_env):
+    # 1. Pega no ambiente atual do terminal (onde pode estar o RUN_PROFILE=TEST)
     env = os.environ.copy()
+    # 2. SOBREPOSIÇÃO: Se a experiência definir um perfil específico, ele GANHA.
     env.update(extra_env)
     print(f"\n[{extra_env.get('EXP_NAME')}] >> Running {script_path.name}...")
     

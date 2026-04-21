@@ -313,8 +313,9 @@ def run_inference(generator, latent_dim, n_samples=64, seed=123, title='Generato
     grid = make_grid(fake, nrow=8).permute(1, 2, 0).numpy()
     plt.figure(figsize=(12, 12))
     plt.imshow(grid); plt.title(title); plt.axis('off')
-    plt.savefig(OUT_DIR / 'generated_samples.png', bbox_inches='tight')
-    plt.show()
+    if cfg.save_samples:
+        plt.savefig(OUT_DIR / 'generated_samples.png', bbox_inches='tight')
+    # plt.show()
 
 
 @torch.no_grad()
