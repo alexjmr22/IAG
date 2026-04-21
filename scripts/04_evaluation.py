@@ -356,13 +356,21 @@ def compute_fid(real_u8: torch.Tensor, fake_u8: torch.Tensor) -> float:
     else:
         fid = fid.to(device)
 
-    # Normalize to float32 [0,1]
-    real = real_u8.float() / 255.0
-    fake = fake_u8.float() / 255.0
+    # torchmetrics expects uint8 [0,255]; keep as-is and move to CPU only for MPS
+    real = real_u8
+    fake = fake_u8
 
     if not run_on_cpu:
         real = real.to(device)
         fake = fake.to(device)
+
+    # Debug: show tensor dtype/device to diagnose MPS/uint8 issues
+    try:
+        fid_dev = next(fid.parameters()).device
+    except StopIteration:
+        fid_dev = 'cpu'
+    print(f"[DEBUG] compute_fid: real dtype={real.dtype} device={real.device} shape={tuple(real.shape)}")
+    print(f"[DEBUG] compute_fid: fid device={fid_dev}")
 
     fid.update(real, real=True)
     fid.update(fake, real=False)
@@ -381,13 +389,21 @@ def compute_kid(real_u8: torch.Tensor, fake_u8: torch.Tensor,
     else:
         kid = kid.to(device)
 
-    # Normalize to float32 [0,1]
-    real = real_u8.float() / 255.0
-    fake = fake_u8.float() / 255.0
+    # torchmetrics expects uint8 [0,255]; keep as-is and move to CPU only for MPS
+    real = real_u8
+    fake = fake_u8
 
     if not run_on_cpu:
         real = real.to(device)
         fake = fake.to(device)
+
+    # Debug: show tensor dtype/device to diagnose MPS/uint8 issues
+    try:
+        kid_dev = next(kid.parameters()).device
+    except StopIteration:
+        kid_dev = 'cpu'
+    print(f"[DEBUG] compute_kid: real dtype={real.dtype} device={real.device} shape={tuple(real.shape)}")
+    print(f"[DEBUG] compute_kid: kid device={kid_dev}")
 
     kid.update(real, real=True)
     kid.update(fake, real=False)
