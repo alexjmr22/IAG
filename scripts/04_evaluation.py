@@ -35,6 +35,7 @@ from torchvision import transforms as T
 import matplotlib.pyplot as plt
 import pandas as pd
 from tqdm.auto import tqdm
+import traceback
 
 # métricas
 from torchmetrics.image.fid import FrechetInceptionDistance
@@ -67,6 +68,7 @@ KID_SUBSETS   = 50
 KID_SUBSET_SZ = 100
 BATCH_SIZE    = 128    # conforme Notebooks 3, 4, 5
 IMAGE_SIZE    = 32
+METRIC_BATCH  = 64     # tamanho do batch para atualizações das métricas (evita picos de memória)
 
 from config import cfg
 N_SAMPLES     = cfg.eval_samples
@@ -356,25 +358,40 @@ def compute_fid(real_u8: torch.Tensor, fake_u8: torch.Tensor) -> float:
     else:
         fid = fid.to(device)
 
-    # torchmetrics expects uint8 [0,255]; keep as-is and move to CPU only for MPS
+    # torchmetrics expects uint8 [0,255]; keep as-is
     real = real_u8
     fake = fake_u8
 
-    if not run_on_cpu:
-        real = real.to(device)
-        fake = fake.to(device)
-
-    # Debug: show tensor dtype/device to diagnose MPS/uint8 issues
+    # se estivermos no MPS, já definimos run_on_cpu True e o objeto da métrica está em CPU
+    # processar updates em batches para reduzir uso de memória
+    n = real.shape[0]
     try:
-        fid_dev = next(fid.parameters()).device
-    except StopIteration:
-        fid_dev = 'cpu'
-    print(f"[DEBUG] compute_fid: real dtype={real.dtype} device={real.device} shape={tuple(real.shape)}")
-    print(f"[DEBUG] compute_fid: fid device={fid_dev}")
+        try:
+            fid_dev = next(fid.parameters()).device
+        except StopIteration:
+            fid_dev = 'cpu'
+        print(f"[DEBUG] compute_fid: real dtype={real.dtype} device={real.device} shape={tuple(real.shape)}")
+        print(f"[DEBUG] compute_fid: fid device={fid_dev}")
 
-    fid.update(real, real=True)
-    fid.update(fake, real=False)
-    return fid.compute().item()
+        for start in range(0, n, METRIC_BATCH):
+            end = min(n, start + METRIC_BATCH)
+            r_batch = real[start:end]
+            f_batch = fake[start:end]
+            if not run_on_cpu:
+                r_batch = r_batch.to(device)
+                f_batch = f_batch.to(device)
+            else:
+                # garantir que estejam em CPU
+                r_batch = r_batch.cpu()
+                f_batch = f_batch.cpu()
+            fid.update(r_batch, real=True)
+            fid.update(f_batch, real=False)
+
+        return fid.compute().item()
+    except Exception:
+        print("[ERROR] Exception in compute_fid:")
+        traceback.print_exc()
+        raise
 
 
 def compute_kid(real_u8: torch.Tensor, fake_u8: torch.Tensor,
@@ -389,26 +406,38 @@ def compute_kid(real_u8: torch.Tensor, fake_u8: torch.Tensor,
     else:
         kid = kid.to(device)
 
-    # torchmetrics expects uint8 [0,255]; keep as-is and move to CPU only for MPS
+    # torchmetrics expects uint8 [0,255]; keep as-is
     real = real_u8
     fake = fake_u8
 
-    if not run_on_cpu:
-        real = real.to(device)
-        fake = fake.to(device)
-
-    # Debug: show tensor dtype/device to diagnose MPS/uint8 issues
+    n = real.shape[0]
     try:
-        kid_dev = next(kid.parameters()).device
-    except StopIteration:
-        kid_dev = 'cpu'
-    print(f"[DEBUG] compute_kid: real dtype={real.dtype} device={real.device} shape={tuple(real.shape)}")
-    print(f"[DEBUG] compute_kid: kid device={kid_dev}")
+        try:
+            kid_dev = next(kid.parameters()).device
+        except StopIteration:
+            kid_dev = 'cpu'
+        print(f"[DEBUG] compute_kid: real dtype={real.dtype} device={real.device} shape={tuple(real.shape)}")
+        print(f"[DEBUG] compute_kid: kid device={kid_dev}")
 
-    kid.update(real, real=True)
-    kid.update(fake, real=False)
-    mean, std = kid.compute()
-    return mean.item(), std.item()
+        for start in range(0, n, METRIC_BATCH):
+            end = min(n, start + METRIC_BATCH)
+            r_batch = real[start:end]
+            f_batch = fake[start:end]
+            if not run_on_cpu:
+                r_batch = r_batch.to(device)
+                f_batch = f_batch.to(device)
+            else:
+                r_batch = r_batch.cpu()
+                f_batch = f_batch.cpu()
+            kid.update(r_batch, real=True)
+            kid.update(f_batch, real=False)
+
+        mean, std = kid.compute()
+        return mean.item(), std.item()
+    except Exception:
+        print("[ERROR] Exception in compute_kid:")
+        traceback.print_exc()
+        raise
 
 
 def evaluate_model(name: str, generate_fn, seeds=None) -> dict:
@@ -422,13 +451,22 @@ def evaluate_model(name: str, generate_fn, seeds=None) -> dict:
     fid_scores, kid_means, kid_stds = [], [], []
 
     for seed in tqdm(seeds, desc=f'Evaluating {name}'):
-        real = sample_real_images(N_SAMPLES, seed)
-        fake = generate_fn(N_SAMPLES, seed)
+        try:
+            real = sample_real_images(N_SAMPLES, seed)
+            fake = generate_fn(N_SAMPLES, seed)
 
-        fid_scores.append(compute_fid(real, fake))
-        km, ks = compute_kid(real, fake)
-        kid_means.append(km)
-        kid_stds.append(ks)
+            fid_val = compute_fid(real, fake)
+            km, ks = compute_kid(real, fake)
+
+            fid_scores.append(fid_val)
+            kid_means.append(km)
+            kid_stds.append(ks)
+        except Exception:
+            print(f"[WARNING] Error evaluating seed {seed} for model {name}, skipping this seed.")
+            traceback.print_exc()
+            fid_scores.append(float('nan'))
+            kid_means.append(float('nan'))
+            kid_stds.append(float('nan'))
 
     return {
         'model'   : name,
