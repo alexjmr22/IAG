@@ -79,6 +79,9 @@ EXPERIMENTS = {
         {'id': 'vae_lr2e3',        'target': 'VAE', 'env': {'RUN_PROFILE':'DEV', 'VAE_LR': '2e-3'}},
         # 6. Latent dim — lat=64 ganhou, lat=128 e 256 estagnaram; testar 96 (meio-termo)
         {'id': 'vae_lat96',        'target': 'VAE', 'env': {'RUN_PROFILE':'DEV', 'VAE_LATENT_DIM': '96'}},
+    
+        {'id': 'vae_beta1',  'target': 'VAE', 'env': {'RUN_PROFILE':'DEV', 'VAE_BETA': '1.0'}},
+
         # 7. Combo completo: os três melhores parâmetros individuais combinados
         {'id': 'vae_combo_full',   'target': 'VAE', 'env': {'RUN_PROFILE':'DEV', 'VAE_BETA': '0.1', 'VAE_LATENT_DIM': '64',  'VAE_LR': '5e-3'}},
         # 8. Combo agressivo: aposta no LR mais alto + beta mínimo + lat=64
