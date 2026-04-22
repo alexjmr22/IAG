@@ -28,6 +28,9 @@ if multiprocessing.current_process().name != 'MainProcess':
 
 import numpy as np
 import torch
+torch.backends.cuda.matmul.allow_tf32 = True
+torch.backends.cudnn.allow_tf32 = True
+torch.backends.cudnn.benchmark = True
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
@@ -40,6 +43,17 @@ import traceback
 # métricas
 from torchmetrics.image.fid import FrechetInceptionDistance
 from torchmetrics.image.kid import KernelInceptionDistance
+
+# CONFIGURAÇÃO DE DEBUG: Mostrar parâmetros globais
+print("="*60)
+print(f"DEBUG: INICIALIZANDO TESTE")
+print(f"  TARGET:        {os.environ.get('EVAL_TARGET', 'ALL')}")
+print(f"  EXP_NAME:      {os.environ.get('EXP_NAME', 'ALL')}")
+print(f"  VAE_LATENT:    {os.environ.get('VAE_LATENT_DIM', '128 (default)')}")
+print(f"  DCGAN_LATENT:  {os.environ.get('DCGAN_LATENT', '100 (default)')}")
+print(f"  DCGAN_NGF:     {os.environ.get('DCGAN_NGF', '64 (default)')}")
+print(f"  DEVICE:        {torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU'}")
+print("="*60)
 
 REPO_ROOT   = Path(__file__).resolve().parent.parent
 SCRIPTS_DIR = REPO_ROOT / 'TP' / 'TP1-alunos-src-only' / 'scripts'
@@ -246,7 +260,7 @@ vae_model = ConvVAE(latent_dim=lat_dim).to(device)
 if EVAL_TARGET in ['ALL', 'VAE'] and CHECKPOINTS['VAE'].exists():
     vae_model.load_state_dict(torch.load(CHECKPOINTS['VAE'], map_location=device))
     vae_model.eval()
-    print('VAE carregado')
+    print(f'VAE carregado (latent_dim={lat_dim})')
 
 # ── DCGAN Generator ───────────────────────────────────────────────────────────
 lat_gan = int(os.environ.get('DCGAN_LATENT', 100))
@@ -256,15 +270,26 @@ if EVAL_TARGET in ['ALL', 'DCGAN'] and CHECKPOINTS['DCGAN'].exists():
     ckpt_gan = torch.load(CHECKPOINTS['DCGAN'], map_location=device)
     G_model.load_state_dict(ckpt_gan['generator'])
     G_model.eval()
-    print('DCGAN Generator carregado')
+    print(f'DCGAN Generator carregado (latent_dim={lat_gan}, ngf={ngf_gan})')
 
 # ── Diffusion ─────────────────────────────────────────────────────────────────
-diff_ch = int(os.environ.get('DIFF_CHANNELS', 64))
+# Prioridade: 1. Nome da EXPN_NAME | 2. Variável de ambiente | 3. Default 64
+diff_ch = 64
+if 'ch32' in EXP_NAME: diff_ch = 32
+elif 'ch128' in EXP_NAME: diff_ch = 128
+else: diff_ch = int(os.environ.get('DIFF_CHANNELS', 64))
+
+diff_t = 1000
+if 'T100' in EXP_NAME: diff_t = 100
+elif 'T250' in EXP_NAME: diff_t = 250
+elif 'T500' in EXP_NAME: diff_t = 500
+else: diff_t = int(os.environ.get('DIFF_T_STEPS', 1000))
+
 diff_model = PixelUNet(in_channels=3, model_channels=diff_ch).to(device)
 if EVAL_TARGET in ['ALL', 'Diffusion'] and CHECKPOINTS['Diffusion'].exists():
     diff_model.load_state_dict(torch.load(CHECKPOINTS['Diffusion'], map_location=device))
     diff_model.eval()
-    print('Diffusion model carregado')
+    print(f'Diffusion model carregado (channels={diff_ch}, T={diff_t})')
 
 # ── GaussianDiffusion schedule (necessário para sampling) ─────────────────────
 class GaussianDiffusion:
@@ -295,7 +320,7 @@ class GaussianDiffusion:
                 x = mean
         return x
 
-schedule = GaussianDiffusion(1000, 1e-4, 0.02, device=str(device))
+schedule = GaussianDiffusion(diff_t, 1e-4, 0.02, device=str(device))
 
 
 # ## 5. Funções de geração de amostras

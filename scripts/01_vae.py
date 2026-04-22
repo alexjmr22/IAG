@@ -81,6 +81,21 @@ EXP_NAME = os.environ.get('EXP_NAME', 'vae')
 OUT_DIR = REPO_ROOT / 'results' / EXP_NAME
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
+# ── LOG DE PARÂMETROS (.md) ──────────────────────────────────────────────────
+params_md = f"""# VAE Experiment: {EXP_NAME}
+- **Date**: {pd.Timestamp.now() if 'pd' in globals() else 'N/A'}
+- **Latent Dim**: {LATENT_DIM}
+- **Beta (KL)**: {BETA}
+- **Learning Rate**: {LR}
+- **Epochs**: {EPOCHS}
+- **Batch Size**: {BATCH_SIZE}
+- **Dataset**: {"20% Subset" if USE_SUBSET else "Full ArtBench10"}
+- **Profile**: {cfg.__class__.__name__ if hasattr(cfg, '__class__') else 'N/A'}
+"""
+with open(OUT_DIR / "experiment_params.md", "w", encoding="utf-8") as f:
+    f.write(params_md)
+print(f"Parâmetros guardados em {OUT_DIR / 'experiment_params.md'}")
+
 
 # ## 2. Dataset — reutiliza `HFDatasetTorch` do notebook 00
 

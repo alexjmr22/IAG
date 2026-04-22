@@ -74,12 +74,31 @@ EPOCHS      = cfg.diffusion_epochs
 USE_SUBSET  = cfg.use_subset
 
 T_STEPS     = int(os.environ.get('DIFF_T_STEPS', 1000))     # passos de difusão
-BETA_START  = 1e-4
-BETA_END    = 0.02
+BETA_START  = float(os.environ.get('DIFF_BETA_START', 1e-4))
+BETA_END    = float(os.environ.get('DIFF_BETA_END', 0.02))
 
 EXP_NAME = os.environ.get('EXP_NAME', 'diffusion')
 OUT_DIR = REPO_ROOT / 'results' / EXP_NAME
 OUT_DIR.mkdir(parents=True, exist_ok=True)
+
+# ── LOG DE PARÂMETROS (.md) ──────────────────────────────────────────────────
+def save_params():
+    params_md = f"""# Diffusion Experiment: {EXP_NAME}
+- **T Steps**: {T_STEPS}
+- **Learning Rate**: {LR}
+- **Epochs**: {EPOCHS}
+- **Batch Size**: {BATCH_SIZE}
+- **Beta Start**: {BETA_START}
+- **Beta End**: {BETA_END}
+- **Channels**: {int(os.environ.get('DIFF_CHANNELS', 64))}
+- **Dataset**: {"20% Subset" if USE_SUBSET else "Full ArtBench10"}
+"""
+    with open(OUT_DIR / "experiment_params.md", "w", encoding="utf-8") as f:
+        f.write(params_md)
+    print(f"Parâmetros guardados em {OUT_DIR / 'experiment_params.md'}")
+
+OUT_DIR.mkdir(parents=True, exist_ok=True)
+save_params()
 
 
 # ## 2. Dataset
@@ -300,7 +319,8 @@ class PixelUNet(nn.Module):
         return self.out_conv(d1)
 
 
-model = PixelUNet(in_channels=3, model_channels=64).to(device)
+_diff_ch = int(os.environ.get('DIFF_CHANNELS', 64))
+model = PixelUNet(in_channels=3, model_channels=_diff_ch).to(device)
 print(f'Parâmetros: {sum(p.numel() for p in model.parameters()):,}')
 
 

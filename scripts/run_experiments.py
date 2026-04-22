@@ -45,17 +45,60 @@ EXPERIMENTS = {
         {'id': 'diff_ch128', 'target': 'Diffusion', 'env': {'RUN_PROFILE':'DEV', 'DIFF_CHANNELS': '128'}},
         {'id': 'diff_lr1e3', 'target': 'Diffusion', 'env': {'RUN_PROFILE':'DEV', 'DIFF_LR': '1e-3'}},
         {'id': 'diff_lr2e5', 'target': 'Diffusion', 'env': {'RUN_PROFILE':'DEV', 'DIFF_LR': '2e-5'}}
+    ],
+    '4': [ # PC 4 — Diffusion best-combo + explorações direcionadas pelos sweeps
+        {'id': 'diff_best_combo', 'target': 'Diffusion', 'env': {'RUN_PROFILE':'DEV', 'DIFF_T_STEPS': '1000', 'DIFF_CHANNELS': '64',  'DIFF_LR': '2e-4'}},
+        {'id': 'diff_T2000',      'target': 'Diffusion', 'env': {'RUN_PROFILE':'DEV', 'DIFF_T_STEPS': '2000'}},
+        {'id': 'diff_ch96',       'target': 'Diffusion', 'env': {'RUN_PROFILE':'DEV', 'DIFF_CHANNELS': '96'}},
+        {'id': 'diff_lr5e5',      'target': 'Diffusion', 'env': {'RUN_PROFILE':'DEV', 'DIFF_LR': '5e-5'}},
+        {'id': 'diff_beta_high',  'target': 'Diffusion', 'env': {'RUN_PROFILE':'DEV', 'DIFF_BETA_END': '0.04'}},
+        {'id': 'diff_beta_low',   'target': 'Diffusion', 'env': {'RUN_PROFILE':'DEV', 'DIFF_BETA_END': '0.01'}},
+        {'id': 'diff_combo_v2',   'target': 'Diffusion', 'env': {'RUN_PROFILE':'DEV', 'DIFF_T_STEPS': '1000', 'DIFF_LR': '5e-5', 'DIFF_CHANNELS': '96'}},
+    ],
+    '5': [ # PC 5 — VAE best-combo + explorações direcionadas pelos sweeps
+        # 1. Âncora: melhor beta + melhor latent dim individualmente
+        {'id': 'vae_best_combo',   'target': 'VAE', 'env': {'RUN_PROFILE':'DEV', 'VAE_BETA': '0.1', 'VAE_LATENT_DIM': '64',  'VAE_LR': '1e-3'}},
+        # 2. Beta — o sweep mostrou melhoria monotónica de 0.7→0.1; testar ainda mais baixo
+        {'id': 'vae_beta005',      'target': 'VAE', 'env': {'RUN_PROFILE':'DEV', 'VAE_BETA': '0.05'}},
+        # 3. Beta — zona entre 0.1 e 0.5 nunca explorada; testar 0.2
+        {'id': 'vae_beta02',       'target': 'VAE', 'env': {'RUN_PROFILE':'DEV', 'VAE_BETA': '0.2'}},
+        # 4. LR — tendência ainda crescente em 5e-3, topo não encontrado; testar 1e-2
+        {'id': 'vae_lr1e2',        'target': 'VAE', 'env': {'RUN_PROFILE':'DEV', 'VAE_LR': '1e-2'}},
+        # 5. LR — ponto intermédio entre o melhor (5e-3) e o default (1e-3)
+        {'id': 'vae_lr2e3',        'target': 'VAE', 'env': {'RUN_PROFILE':'DEV', 'VAE_LR': '2e-3'}},
+        # 6. Latent dim — lat=64 ganhou, lat=128 e 256 estagnaram; testar 96 (meio-termo)
+        {'id': 'vae_lat96',        'target': 'VAE', 'env': {'RUN_PROFILE':'DEV', 'VAE_LATENT_DIM': '96'}},
+        # 7. Combo completo: os três melhores parâmetros individuais combinados
+        {'id': 'vae_combo_full',   'target': 'VAE', 'env': {'RUN_PROFILE':'DEV', 'VAE_BETA': '0.1', 'VAE_LATENT_DIM': '64',  'VAE_LR': '5e-3'}},
+        # 8. Combo agressivo: aposta no LR mais alto + beta mínimo + lat=64
+        {'id': 'vae_combo_bold',   'target': 'VAE', 'env': {'RUN_PROFILE':'DEV', 'VAE_BETA': '0.05', 'VAE_LATENT_DIM': '64', 'VAE_LR': '5e-3'}},
     ]
 }
 
 def run_script(script_path, extra_env):
-    # 1. Pega no ambiente atual do terminal (onde pode estar o RUN_PROFILE=TEST)
+    # Use the correct python executable from the virtual environment
+    python_exe = sys.executable
+    if ".venv" not in python_exe:
+        # Fallback to local .venv if run from global python
+        venv_python = Path(os.getcwd()) / ".venv" / "Scripts" / "python.exe"
+        if venv_python.exists():
+            python_exe = str(venv_python)
+
+    # 1. Pega no ambiente atual do terminal
     env = os.environ.copy()
-    # 2. SOBREPOSIÇÃO: Se a experiência definir um perfil específico, ele GANHA.
+    # 2. Limpar variáveis de experimento para não contaminar runs sem essa var definida
+    _exp_vars = [
+        'VAE_LATENT_DIM', 'VAE_BETA', 'VAE_LR',
+        'DCGAN_LATENT', 'DCGAN_NGF', 'DCGAN_NDF', 'DCGAN_BETA1', 'DCGAN_LR',
+        'DIFF_CHANNELS', 'DIFF_T_STEPS', 'DIFF_LR', 'DIFF_BETA_START', 'DIFF_BETA_END',
+    ]
+    for v in _exp_vars:
+        env.pop(v, None)
+    # 3. SOBREPOSIÇÃO com os valores do experimento atual
     env.update(extra_env)
     print(f"\n[{extra_env.get('EXP_NAME')}] >> Running {script_path.name}...")
     
-    result = subprocess.run([sys.executable, str(script_path)], env=env)
+    result = subprocess.run([python_exe, str(script_path)], env=env)
     
     if result.returncode != 0:
         print(f"!!! CRITICAL FAILURE in {script_path.name} under {extra_env.get('EXP_NAME')} !!!")
@@ -66,7 +109,7 @@ def run_script(script_path, extra_env):
 
 def main():
     parser = argparse.ArgumentParser(description="Grid Search Automated Orchestrator")
-    parser.add_argument('--pc', type=str, required=True, choices=['1', '2', '3'], help="ID do Computador (1, 2, ou 3)")
+    parser.add_argument('--pc', type=str, required=True, choices=['1', '2', '3', '4', '5'], help="ID do Computador (1, 2, 3, 4, ou 5)")
     args = parser.parse_args()
 
     pc_experiments = EXPERIMENTS[args.pc]
