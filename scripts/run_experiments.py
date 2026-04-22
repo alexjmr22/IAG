@@ -47,13 +47,24 @@ EXPERIMENTS = {
         {'id': 'diff_lr2e5', 'target': 'Diffusion', 'env': {'RUN_PROFILE':'DEV', 'DIFF_LR': '2e-5'}}
     ],
     '4': [ # PC 4 — Diffusion best-combo + explorações direcionadas pelos sweeps
-        {'id': 'diff_best_combo', 'target': 'Diffusion', 'env': {'RUN_PROFILE':'DEV', 'DIFF_T_STEPS': '1000', 'DIFF_CHANNELS': '64',  'DIFF_LR': '2e-4'}},
-        {'id': 'diff_T2000',      'target': 'Diffusion', 'env': {'RUN_PROFILE':'DEV', 'DIFF_T_STEPS': '2000'}},
-        {'id': 'diff_ch96',       'target': 'Diffusion', 'env': {'RUN_PROFILE':'DEV', 'DIFF_CHANNELS': '96'}},
-        {'id': 'diff_lr5e5',      'target': 'Diffusion', 'env': {'RUN_PROFILE':'DEV', 'DIFF_LR': '5e-5'}},
-        {'id': 'diff_beta_high',  'target': 'Diffusion', 'env': {'RUN_PROFILE':'DEV', 'DIFF_BETA_END': '0.04'}},
-        {'id': 'diff_beta_low',   'target': 'Diffusion', 'env': {'RUN_PROFILE':'DEV', 'DIFF_BETA_END': '0.01'}},
-        {'id': 'diff_combo_v2',   'target': 'Diffusion', 'env': {'RUN_PROFILE':'DEV', 'DIFF_T_STEPS': '1000', 'DIFF_LR': '5e-5', 'DIFF_CHANNELS': '96'}},
+        # Âncora: melhor combo individual do sweep 3 (T=1000 e ch=64 empatam com default; lr=2e-4 é o único bom)
+        {'id': 'diff_best_combo',    'target': 'Diffusion', 'env': {'RUN_PROFILE':'DEV', 'DIFF_T_STEPS': '1000', 'DIFF_CHANNELS': '64', 'DIFF_LR': '2e-4'}},
+        # T-steps: tendência monotónica clara no sweep (T100<T250<T500<T1000); explorar T=1500 e T=2000 para confirmar
+        {'id': 'diff_T1500',         'target': 'Diffusion', 'env': {'RUN_PROFILE':'DEV', 'DIFF_T_STEPS': '1500'}},
+        {'id': 'diff_T2000',         'target': 'Diffusion', 'env': {'RUN_PROFILE':'DEV', 'DIFF_T_STEPS': '2000'}},
+        # T=2000 + ch=64: combo da tendência mais forte com o melhor canal
+        {'id': 'diff_T2000_ch64',    'target': 'Diffusion', 'env': {'RUN_PROFILE':'DEV', 'DIFF_T_STEPS': '2000', 'DIFF_CHANNELS': '64', 'DIFF_LR': '2e-4'}},
+        # ch96: channels — ch128 piorou (FID 187), mas vale testar intermédio entre 64 e 128
+        {'id': 'diff_ch96',          'target': 'Diffusion', 'env': {'RUN_PROFILE':'DEV', 'DIFF_CHANNELS': '96'}},
+        # LR: 5e-5 — ponto entre o melhor (2e-4) e o pior (2e-5); o sweep não cobriu esta zona
+        {'id': 'diff_lr5e5',         'target': 'Diffusion', 'env': {'RUN_PROFILE':'DEV', 'DIFF_LR': '5e-5'}},
+        # Beta schedule: não explorado no sweep 3 — testar isolado para perceber sensibilidade
+        {'id': 'diff_beta_high',     'target': 'Diffusion', 'env': {'RUN_PROFILE':'DEV', 'DIFF_BETA_END': '0.04'}},
+        {'id': 'diff_beta_low',      'target': 'Diffusion', 'env': {'RUN_PROFILE':'DEV', 'DIFF_BETA_END': '0.01'}},
+        # Beta low + melhores params: se beta_low ganhar isolado, este é o combo natural
+        {'id': 'diff_beta_low_combo','target': 'Diffusion', 'env': {'RUN_PROFILE':'DEV', 'DIFF_T_STEPS': '1000', 'DIFF_CHANNELS': '64', 'DIFF_LR': '2e-4', 'DIFF_BETA_END': '0.01'}},
+        # Combo v2: T=2000 + beta_low + ch=64 — aposta máxima se ambas as tendências forem positivas
+        {'id': 'diff_combo_v2',      'target': 'Diffusion', 'env': {'RUN_PROFILE':'DEV', 'DIFF_T_STEPS': '2000', 'DIFF_CHANNELS': '64', 'DIFF_LR': '2e-4', 'DIFF_BETA_END': '0.01'}},
     ],
     '5': [ # PC 5 — VAE best-combo + explorações direcionadas pelos sweeps
         # 1. Âncora: melhor beta + melhor latent dim individualmente
