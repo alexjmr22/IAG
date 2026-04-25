@@ -49,4 +49,13 @@ PROFILES = {
 
 cfg = Config(**PROFILES.get(PROFILE_NAME, PROFILES['PROD']))
 
+# Override com variáveis de ambiente se definidas
+if 'VAE_EPOCHS' in os.environ:
+    cfg.vae_epochs = int(os.environ['VAE_EPOCHS'])
+if 'DCGAN_EPOCHS' in os.environ:
+    cfg.dcgan_epochs = int(os.environ['DCGAN_EPOCHS'])
+if 'DIFFUSION_EPOCHS' in os.environ:
+    cfg.diffusion_epochs = int(os.environ['DIFFUSION_EPOCHS'])
+
 print(f"-> Profile: [{PROFILE_NAME}] carregado!")
+print(f"-> VAE Epochs: {cfg.vae_epochs} (env override: {'VAE_EPOCHS' in os.environ})")
