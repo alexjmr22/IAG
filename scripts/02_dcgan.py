@@ -85,26 +85,6 @@ EXP_NAME = os.environ.get('EXP_NAME', 'dcgan')
 OUT_DIR = REPO_ROOT / 'results' / EXP_NAME
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
-# ── LOG DE PARÂMETROS (.md) ──────────────────────────────────────────────────
-def save_params():
-    params_md = f"""# DCGAN Experiment: {EXP_NAME}
-- **Latent Dim**: {LATENT_DIM}
-- **NGF (Gen Filters)**: {NGF}
-- **NDF (Disc Filters)**: {NDF}
-- **Learning Rate G**: {LR_G}
-- **Learning Rate D**: {LR_D}
-- **Beta1**: {BETA1}
-- **Epochs**: {EPOCHS}
-- **Batch Size**: {BATCH_SIZE}
-- **Dataset**: {"20% Subset" if USE_SUBSET else "Full ArtBench10"}
-"""
-    with open(OUT_DIR / "experiment_params.md", "w", encoding="utf-8") as f:
-        f.write(params_md)
-    print(f"Parâmetros guardados em {OUT_DIR / 'experiment_params.md'}")
-
-OUT_DIR.mkdir(parents=True, exist_ok=True)
-save_params()
-
 # ruído fixo para visualização consistente entre épocas
 FIXED_NOISE = torch.randn(64, LATENT_DIM, device=device)
 
