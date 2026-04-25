@@ -1,0 +1,12 @@
+# VAE Experiment: vae_prod_beta001_200ep
+- **Date**: N/A
+- **Latent Dim**: 128
+- **Beta (KL)**: 0.01
+- **Learning Rate**: 0.002
+- **Epochs**: 200
+- **Batch Size**: 128
+- **Dataset**: Full ArtBench10
+- **Profile**: Config
+- **Cosine Annealing LR**: False
+- **KL Annealing Epochs**: 0
+- **Perceptual Loss Weight**: 0

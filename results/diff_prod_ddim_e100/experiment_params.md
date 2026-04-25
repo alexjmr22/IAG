@@ -1,0 +1,13 @@
+# Diffusion Experiment: diff_prod_ddim_e100
+- **Date**: 2026-04-25 19:49:27.607415
+- **T Steps**: 1000
+- **Learning Rate**: 0.0004
+- **LR Scheduler**: cosine annealing with 5-epoch linear warmup
+- **Epochs**: 100
+- **Batch Size**: 128
+- **Beta Start**: 0.0001
+- **Beta End**: 0.02
+- **Channels**: 96
+- **Sampler**: DDIM (100 steps)
+- **Dataset**: Full ArtBench10
+- **Profile**: Config
