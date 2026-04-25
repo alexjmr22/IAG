@@ -80,7 +80,7 @@ BETA_END     = float(os.environ.get('DIFF_BETA_END', 0.02))
 WARMUP_EPOCHS = int(os.environ.get('DIFF_WARMUP_EPOCHS', 5))
 
 EXP_NAME = os.environ.get('EXP_NAME', 'diffusion')
-OUT_DIR = REPO_ROOT / 'results' / EXP_NAME
+OUT_DIR = REPO_ROOT / 'results' / 'diff' / EXP_NAME
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 SAMPLER     = os.environ.get('DIFF_SAMPLER', 'ddpm').lower()   # 'ddpm' or 'ddim'

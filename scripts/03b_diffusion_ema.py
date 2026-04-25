@@ -62,7 +62,7 @@ WARMUP_EPOCHS = int(os.environ.get('DIFF_WARMUP_EPOCHS', 5))
 EMA_DECAY     = float(os.environ.get('DIFF_EMA_DECAY', 0.9999))
 
 EXP_NAME = os.environ.get('EXP_NAME', 'diffusion_ema')
-OUT_DIR  = REPO_ROOT / 'results' / EXP_NAME
+OUT_DIR  = REPO_ROOT / 'results' / 'diff' / EXP_NAME
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 SAMPLER    = os.environ.get('DIFF_SAMPLER', 'ddim').lower()

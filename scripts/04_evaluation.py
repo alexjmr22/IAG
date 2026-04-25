@@ -92,17 +92,30 @@ import os
 EXP_NAME = os.environ.get('EXP_NAME', 'ALL')
 EVAL_TARGET = os.environ.get('EVAL_TARGET', 'ALL')
 
+_VAE_TARGETS  = {'VAE', 'CVAE', 'VQ_VAE'}
+_GAN_TARGETS  = {'DCGAN', 'cDCGAN', 'StyleGAN', 'WGAN'}
+_DIFF_TARGETS = {'Diffusion', 'DiffusionEMA'}
+
+def _group(target):
+    if target in _VAE_TARGETS:  return 'vae'
+    if target in _GAN_TARGETS:  return 'gan'
+    if target in _DIFF_TARGETS: return 'diff'
+    return ''
+
+_grp = _group(EVAL_TARGET)
+_base = REPO_ROOT / 'results' / _grp / EXP_NAME if (_grp and EXP_NAME != 'ALL') else REPO_ROOT / 'results'
+
 CHECKPOINTS = {
-    'VAE'      : REPO_ROOT / 'results' / (EXP_NAME if EVAL_TARGET in ['ALL', 'VAE'] and EXP_NAME != 'ALL' else 'vae') / 'vae_checkpoint.pth',
-    'CVAE'     : REPO_ROOT / 'results' / (EXP_NAME if EVAL_TARGET in ['ALL', 'CVAE'] and EXP_NAME != 'ALL' else 'cvae') / 'cvae_checkpoint.pth',
-    'VQ_VAE'   : REPO_ROOT / 'results' / (EXP_NAME if EVAL_TARGET in ['ALL', 'VQ_VAE'] and EXP_NAME != 'ALL' else 'vq_vae') / 'vq_vae_checkpoint.pth',
-    'DCGAN'    : REPO_ROOT / 'results' / (EXP_NAME if EVAL_TARGET in ['ALL', 'DCGAN'] and EXP_NAME != 'ALL' else 'dcgan') / 'dcgan_checkpoint.pt',
-    'Diffusion': REPO_ROOT / 'results' / (EXP_NAME if EVAL_TARGET in ['ALL', 'Diffusion'] and EXP_NAME != 'ALL' else 'diffusion') / 'diffusion_checkpoint.pth',
-    'cDCGAN'   : REPO_ROOT / 'results' / (EXP_NAME if EVAL_TARGET in ['ALL', 'cDCGAN'] and EXP_NAME != 'ALL' else 'cdcgan') / 'cdcgan_checkpoint.pt',
-    'StyleGAN' : REPO_ROOT / 'results' / (EXP_NAME if EVAL_TARGET in ['ALL', 'StyleGAN'] and EXP_NAME != 'ALL' else 'stylegan') / 'dcgan_checkpoint.pt',
+    'VAE'      : REPO_ROOT / 'results' / 'vae'  / (EXP_NAME if EVAL_TARGET in _VAE_TARGETS  and EXP_NAME != 'ALL' else 'default_vae')  / 'vae_checkpoint.pth',
+    'CVAE'     : REPO_ROOT / 'results' / 'vae'  / (EXP_NAME if EVAL_TARGET == 'CVAE'         and EXP_NAME != 'ALL' else 'cvae')          / 'cvae_checkpoint.pth',
+    'VQ_VAE'   : REPO_ROOT / 'results' / 'vae'  / (EXP_NAME if EVAL_TARGET == 'VQ_VAE'       and EXP_NAME != 'ALL' else 'vq_vae')        / 'vq_vae_checkpoint.pth',
+    'DCGAN'    : REPO_ROOT / 'results' / 'gan'  / (EXP_NAME if EVAL_TARGET in _GAN_TARGETS   and EXP_NAME != 'ALL' else 'default_dcgan') / 'dcgan_checkpoint.pt',
+    'Diffusion': REPO_ROOT / 'results' / 'diff' / (EXP_NAME if EVAL_TARGET in _DIFF_TARGETS  and EXP_NAME != 'ALL' else 'default_diff')  / 'diffusion_checkpoint.pth',
+    'cDCGAN'   : REPO_ROOT / 'results' / 'gan'  / (EXP_NAME if EVAL_TARGET == 'cDCGAN'       and EXP_NAME != 'ALL' else 'cdcgan')        / 'cdcgan_checkpoint.pt',
+    'StyleGAN' : REPO_ROOT / 'results' / 'gan'  / (EXP_NAME if EVAL_TARGET == 'StyleGAN'     and EXP_NAME != 'ALL' else 'stylegan_default') / 'dcgan_checkpoint.pt',
 }
 
-OUT_DIR = REPO_ROOT / 'results' / (EXP_NAME if EXP_NAME != 'ALL' else 'evaluation')
+OUT_DIR = _base if EXP_NAME != 'ALL' else REPO_ROOT / 'results' / 'evaluation'
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 

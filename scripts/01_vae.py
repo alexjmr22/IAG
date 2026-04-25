@@ -84,7 +84,7 @@ KL_ANNEALING_EPOCHS = int(os.environ.get('VAE_KL_ANNEALING_EPOCHS', 0))  # 0 = d
 USE_PERCEPTUAL_LOSS = os.environ.get('VAE_PERCEPTUAL_LOSS', '0')  # weight, or '0' to disable
 
 EXP_NAME = os.environ.get('EXP_NAME', 'vae')
-OUT_DIR = REPO_ROOT / 'results' / EXP_NAME
+OUT_DIR = REPO_ROOT / 'results' / 'vae' / EXP_NAME
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 # ── LOG DE PARÂMETROS (.md) ──────────────────────────────────────────────────

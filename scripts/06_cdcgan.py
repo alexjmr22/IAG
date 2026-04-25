@@ -57,7 +57,7 @@ EPOCHS     = int(os.environ.get('DCGAN_EPOCHS', cfg.dcgan_epochs))
 USE_SUBSET = cfg.use_subset
 
 EXP_NAME = os.environ.get('EXP_NAME', 'cdcgan')
-OUT_DIR  = REPO_ROOT / 'results' / EXP_NAME
+OUT_DIR  = REPO_ROOT / 'results' / 'gan' / EXP_NAME
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 FIXED_NOISE  = torch.randn(64, LATENT_DIM, device=device)
