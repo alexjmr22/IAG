@@ -94,6 +94,8 @@ EVAL_TARGET = os.environ.get('EVAL_TARGET', 'ALL')
 
 CHECKPOINTS = {
     'VAE'      : REPO_ROOT / 'results' / (EXP_NAME if EVAL_TARGET in ['ALL', 'VAE'] and EXP_NAME != 'ALL' else 'vae') / 'vae_checkpoint.pth',
+    'CVAE'     : REPO_ROOT / 'results' / (EXP_NAME if EVAL_TARGET in ['ALL', 'CVAE'] and EXP_NAME != 'ALL' else 'cvae') / 'cvae_checkpoint.pth',
+    'VQ_VAE'   : REPO_ROOT / 'results' / (EXP_NAME if EVAL_TARGET in ['ALL', 'VQ_VAE'] and EXP_NAME != 'ALL' else 'vq_vae') / 'vq_vae_checkpoint.pth',
     'DCGAN'    : REPO_ROOT / 'results' / (EXP_NAME if EVAL_TARGET in ['ALL', 'DCGAN'] and EXP_NAME != 'ALL' else 'dcgan') / 'dcgan_checkpoint.pt',
     'Diffusion': REPO_ROOT / 'results' / (EXP_NAME if EVAL_TARGET in ['ALL', 'Diffusion'] and EXP_NAME != 'ALL' else 'diffusion') / 'diffusion_checkpoint.pth',
 }
@@ -190,6 +192,103 @@ class ConvVAE(nn.Module):
         return self.decode(self.reparameterize(mu, lv)), mu, lv
 
 
+# ── ConditionalVAE (CVAE com suporte a classe) ────────────────────────────────
+class ConditionalVAE(nn.Module):
+    def __init__(self, latent_dim=128, num_classes=10, class_embedding_dim=16):
+        super().__init__()
+        self.latent_dim = latent_dim
+        self.num_classes = num_classes
+        self.class_embedding_dim = class_embedding_dim
+        self.class_embedding = nn.Embedding(num_classes, class_embedding_dim)
+        
+        self.enc_conv = nn.Sequential(
+            nn.Conv2d(3, 32, 3, stride=2, padding=1), nn.BatchNorm2d(32), nn.ReLU(),
+            nn.Conv2d(32, 64, 3, stride=2, padding=1), nn.BatchNorm2d(64), nn.ReLU(),
+            nn.Conv2d(64, 128, 3, stride=2, padding=1), nn.BatchNorm2d(128), nn.ReLU(),
+        )
+        self.fc_mu     = nn.Linear(128*4*4 + class_embedding_dim, latent_dim)
+        self.fc_logvar = nn.Linear(128*4*4 + class_embedding_dim, latent_dim)
+        self.dec_fc    = nn.Linear(latent_dim + class_embedding_dim, 128*4*4)
+        self.dec_conv  = nn.Sequential(
+            nn.ConvTranspose2d(128, 64, 4, stride=2, padding=1), nn.BatchNorm2d(64), nn.ReLU(),
+            nn.ConvTranspose2d(64, 32, 4, stride=2, padding=1),  nn.BatchNorm2d(32), nn.ReLU(),
+            nn.ConvTranspose2d(32, 3,  4, stride=2, padding=1),  nn.Tanh(),
+        )
+    
+    def encode(self, x, c):
+        h = self.enc_conv(x).view(x.size(0), -1)
+        c_emb = self.class_embedding(c)
+        h = torch.cat([h, c_emb], dim=1)
+        return self.fc_mu(h), self.fc_logvar(h)
+    
+    def reparameterize(self, mu, logvar):
+        return mu + torch.randn_like(mu) * torch.exp(0.5 * logvar)
+    
+    def decode(self, z, c):
+        c_emb = self.class_embedding(c)
+        z_c = torch.cat([z, c_emb], dim=1)
+        return self.dec_conv(self.dec_fc(z_c).view(-1, 128, 4, 4))
+    
+    def forward(self, x, c):
+        mu, lv = self.encode(x, c)
+        return self.decode(self.reparameterize(mu, lv), c), mu, lv
+
+
+# ── VectorQuantizer (para VQ-VAE) ─────────────────────────────────────────────
+class VectorQuantizer(nn.Module):
+    def __init__(self, num_embeddings, embedding_dim):
+        super().__init__()
+        self.num_embeddings = num_embeddings
+        self.embedding_dim = embedding_dim
+        self.embedding = nn.Embedding(num_embeddings, embedding_dim)
+        self.embedding.weight.data.uniform_(-1.0 / num_embeddings, 1.0 / num_embeddings)
+    
+    def forward(self, inputs):
+        input_shape = inputs.shape
+        flat = inputs.view(-1, self.embedding_dim)
+        distances = (torch.sum(flat**2, dim=1, keepdim=True)
+                    + torch.sum(self.embedding.weight**2, dim=1)
+                    - 2 * torch.matmul(flat, self.embedding.weight.t()))
+        indices = torch.argmin(distances, dim=1)
+        quantized = self.embedding(indices).view(input_shape)
+        quantized = inputs + (quantized - inputs).detach()
+        return quantized, indices
+
+
+# ── VQVAE (Vector Quantized VAE) ──────────────────────────────────────────────
+class VQVAE(nn.Module):
+    def __init__(self, latent_dim=128, num_embeddings=256):
+        super().__init__()
+        self.latent_dim = latent_dim
+        self.enc_conv = nn.Sequential(
+            nn.Conv2d(3, 32, 3, stride=2, padding=1), nn.BatchNorm2d(32), nn.ReLU(),
+            nn.Conv2d(32, 64, 3, stride=2, padding=1), nn.BatchNorm2d(64), nn.ReLU(),
+            nn.Conv2d(64, 128, 3, stride=2, padding=1), nn.BatchNorm2d(128), nn.ReLU(),
+        )
+        self.enc_to_latent = nn.Conv2d(128, latent_dim, 1, 1, 0)
+        self.vq = VectorQuantizer(num_embeddings, latent_dim)
+        self.dec_from_latent = nn.Conv2d(latent_dim, 128, 1, 1, 0)
+        self.dec_conv = nn.Sequential(
+            nn.ConvTranspose2d(128, 64, 4, stride=2, padding=1), nn.BatchNorm2d(64), nn.ReLU(),
+            nn.ConvTranspose2d(64, 32, 4, stride=2, padding=1),  nn.BatchNorm2d(32), nn.ReLU(),
+            nn.ConvTranspose2d(32, 3,  4, stride=2, padding=1),  nn.Tanh(),
+        )
+    
+    def encode(self, x):
+        h = self.enc_conv(x)
+        z = self.enc_to_latent(h)
+        return z
+    
+    def decode(self, z_q):
+        h = self.dec_from_latent(z_q)
+        return self.dec_conv(h)
+    
+    def forward(self, x):
+        z = self.encode(x)
+        z_q, indices = self.vq(z)
+        return self.decode(z_q), z_q, indices
+
+
 # ── DCGenerator (notebook 02) ─────────────────────────────────────────────────
 class DCGenerator(nn.Module):
     def __init__(self, latent_dim=100, image_channels=3, ngf=64):
@@ -261,6 +360,20 @@ if EVAL_TARGET in ['ALL', 'VAE'] and CHECKPOINTS['VAE'].exists():
     vae_model.load_state_dict(torch.load(CHECKPOINTS['VAE'], map_location=device))
     vae_model.eval()
     print(f'VAE carregado (latent_dim={lat_dim})')
+
+# ── CVAE (Conditional VAE) ───────────────────────────────────────────────────
+cvae_model = ConditionalVAE(latent_dim=lat_dim, num_classes=10).to(device)
+if EVAL_TARGET in ['ALL', 'CVAE'] and CHECKPOINTS['CVAE'].exists():
+    cvae_model.load_state_dict(torch.load(CHECKPOINTS['CVAE'], map_location=device))
+    cvae_model.eval()
+    print(f'CVAE carregado (latent_dim={lat_dim})')
+
+# ── VQ-VAE (Vector Quantized VAE) ────────────────────────────────────────────
+vqvae_model = VQVAE(latent_dim=lat_dim, num_embeddings=256).to(device)
+if EVAL_TARGET in ['ALL', 'VQ_VAE'] and CHECKPOINTS['VQ_VAE'].exists():
+    vqvae_model.load_state_dict(torch.load(CHECKPOINTS['VQ_VAE'], map_location=device))
+    vqvae_model.eval()
+    print(f'VQ-VAE carregado (latent_dim={lat_dim})')
 
 # ── DCGAN Generator ───────────────────────────────────────────────────────────
 lat_gan = int(os.environ.get('DCGAN_LATENT', 100))
@@ -363,6 +476,34 @@ def generate_diffusion(n: int, seed: int) -> torch.Tensor:
         bs   = min(BATCH_SIZE, n - start)
         imgs = schedule.p_sample_loop(diff_model, shape=(bs, 3, IMAGE_SIZE, IMAGE_SIZE))
         imgs = (imgs * 0.5 + 0.5).clamp(0, 1)
+        batches.append((imgs.cpu() * 255).to(torch.uint8))
+    return torch.cat(batches)
+
+
+@torch.no_grad()
+def generate_cvae(n: int, seed: int) -> torch.Tensor:
+    """CVAE: gera amostras com classe aleatória. (N, 3, 32, 32) uint8."""
+    torch.manual_seed(seed)
+    batches = []
+    for start in range(0, n, BATCH_SIZE):
+        bs   = min(BATCH_SIZE, n - start)
+        z    = torch.randn(bs, lat_dim, device=device)
+        c    = torch.randint(0, 10, (bs,), device=device)  # classe aleatória [0, 9]
+        imgs = (cvae_model.decode(z, c) * 0.5 + 0.5).clamp(0, 1)
+        batches.append((imgs.cpu() * 255).to(torch.uint8))
+    return torch.cat(batches)
+
+
+@torch.no_grad()
+def generate_vqvae(n: int, seed: int) -> torch.Tensor:
+    """VQ-VAE: gera amostras com latent aleatório. (N, 3, 32, 32) uint8."""
+    torch.manual_seed(seed)
+    batches = []
+    for start in range(0, n, BATCH_SIZE):
+        bs   = min(BATCH_SIZE, n - start)
+        # VQ-VAE usa latent 4×4 (spatial), não 1×1
+        z = torch.randn(bs, lat_dim, 4, 4, device=device)
+        imgs = (vqvae_model.decode(z) * 0.5 + 0.5).clamp(0, 1)
         batches.append((imgs.cpu() * 255).to(torch.uint8))
     return torch.cat(batches)
 
@@ -513,6 +654,10 @@ if __name__ == '__main__':
     results = []
     if EVAL_TARGET in ['ALL', 'VAE'] and CHECKPOINTS['VAE'].exists():
         results.append(evaluate_model('VAE',       generate_vae))
+    if EVAL_TARGET in ['ALL', 'CVAE'] and CHECKPOINTS['CVAE'].exists():
+        results.append(evaluate_model('CVAE',      generate_cvae))
+    if EVAL_TARGET in ['ALL', 'VQ_VAE'] and CHECKPOINTS['VQ_VAE'].exists():
+        results.append(evaluate_model('VQ-VAE',    generate_vqvae))
     if EVAL_TARGET in ['ALL', 'DCGAN'] and CHECKPOINTS['DCGAN'].exists():
         results.append(evaluate_model('DCGAN',     generate_dcgan))
     if EVAL_TARGET in ['ALL', 'Diffusion'] and CHECKPOINTS['Diffusion'].exists():

@@ -38,6 +38,7 @@ import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms as T
 from torchvision.utils import make_grid, save_image
+from torchvision import models as tv_models
 import matplotlib.pyplot as plt
 from tqdm.auto import tqdm
 
@@ -77,6 +78,11 @@ from config import cfg
 EPOCHS      = cfg.vae_epochs
 USE_SUBSET  = cfg.use_subset   # False → dataset completo (avaliação final)
 
+# ── Schedulers ────────────────────────────────────────────────────────────────
+USE_COSINE_LR = os.environ.get('VAE_COSINE_LR', 'false').lower() == 'true'
+KL_ANNEALING_EPOCHS = int(os.environ.get('VAE_KL_ANNEALING_EPOCHS', 0))  # 0 = disabled
+USE_PERCEPTUAL_LOSS = os.environ.get('VAE_PERCEPTUAL_LOSS', '0')  # weight, or '0' to disable
+
 EXP_NAME = os.environ.get('EXP_NAME', 'vae')
 OUT_DIR = REPO_ROOT / 'results' / EXP_NAME
 OUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -91,6 +97,9 @@ params_md = f"""# VAE Experiment: {EXP_NAME}
 - **Batch Size**: {BATCH_SIZE}
 - **Dataset**: {"20% Subset" if USE_SUBSET else "Full ArtBench10"}
 - **Profile**: {cfg.__class__.__name__ if hasattr(cfg, '__class__') else 'N/A'}
+- **Cosine Annealing LR**: {USE_COSINE_LR}
+- **KL Annealing Epochs**: {KL_ANNEALING_EPOCHS}
+- **Perceptual Loss Weight**: {USE_PERCEPTUAL_LOSS}
 """
 with open(OUT_DIR / "experiment_params.md", "w", encoding="utf-8") as f:
     f.write(params_md)
@@ -163,6 +172,44 @@ print(f'Amostras: {len(train_ds)} | Batches: {len(train_loader)}')
 # In[10]:
 
 
+class PerceptualLoss(nn.Module):
+    """Perceptual loss usando VGG19 relu2_2 features."""
+    def __init__(self, device):
+        super().__init__()
+        self.device = device
+        vgg = tv_models.vgg19(pretrained=True)
+        # Extrair até relu2_2 (layer 9 in VGG19 features)
+        self.features = nn.Sequential(*list(vgg.features.children())[:10]).to(device)
+        # Freeze VGG weights
+        for param in self.features.parameters():
+            param.requires_grad = False
+        self.features.eval()
+        
+        # normalize ImageNet — FIX: Registar buffers JÁ no device correto
+        self.register_buffer('vgg_mean', torch.tensor([0.485, 0.456, 0.406], device=device).view(1, 3, 1, 1))
+        self.register_buffer('vgg_std', torch.tensor([0.229, 0.224, 0.225], device=device).view(1, 3, 1, 1))
+    
+    def forward(self, x_reconstructed, x_original):
+        """
+        x_reconstructed, x_original: normalized to [-1, 1]
+        Returns perceptual loss (L2 on relu2_2 features)
+        """
+        # Denormalize from [-1, 1] to [0, 1]
+        x_recon_01 = (x_reconstructed + 1) / 2
+        x_orig_01 = (x_original + 1) / 2
+        
+        # Normalize to ImageNet
+        x_recon_norm = (x_recon_01 - self.vgg_mean) / self.vgg_std
+        x_orig_norm = (x_orig_01 - self.vgg_mean) / self.vgg_std
+        
+        # Extract features
+        feat_recon = self.features(x_recon_norm)
+        feat_orig = self.features(x_orig_norm)
+        
+        # L2 loss on features
+        return F.mse_loss(feat_recon, feat_orig)
+
+
 class ConvVAE(nn.Module):
     def __init__(self, latent_dim=128):
         super().__init__()
@@ -219,50 +266,94 @@ print(f'Parâmetros: {sum(p.numel() for p in model.parameters()):,}')
 # In[11]:
 
 
-def vae_loss(xhat, x, mu, logvar, beta=0.7):
-    """Reconstrução (MSE) + β·KL  —  mesma formulação do notebook 3."""
+def vae_loss(xhat, x, mu, logvar, beta=0.7, latent_dim=128, perceptual_loss_fn=None, perceptual_weight=0.0):
+    """Reconstrução (MSE) + β·KL + λ·Perceptual — formulação ORIGINAL do notebook 3."""
     recon = F.mse_loss(xhat, x, reduction='sum') / x.size(0)
+    # Original: KL dividido apenas por batch_size (como no notebook 3)
     kl    = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp()) / x.size(0)
-    return recon + beta * kl, recon, kl
+    
+    # Optional perceptual loss
+    if perceptual_loss_fn is not None and perceptual_weight > 0:
+        perc = perceptual_loss_fn(xhat, x)
+        total = recon + beta * kl + perceptual_weight * perc
+        return total, recon, kl, perc
+    else:
+        return recon + beta * kl, recon, kl, None
 
 
-def train_vae(model, loader, optimizer, epochs=50, beta=0.7):
+def get_kl_beta(epoch, warmup_epochs, final_beta=0.7):
+    """Calcula beta com annealing linear nos primeiros warmup_epochs.
+    
+    Implementação baseada em Bowman et al 2016, Ptu et al 2018:
+    - Linear warmup de 0→final_beta durante warmup_epochs
+    - Depois constante em final_beta
+    - Evita KL explosion no epoch 0 (começa em final_beta/warmup_epochs, não 0)
+    """
+    if warmup_epochs == 0:
+        return final_beta
+    if epoch >= warmup_epochs:
+        return final_beta
+    # Linear warmup: starts at final_beta/warmup_epochs on epoch 0
+    return final_beta * ((epoch + 1) / warmup_epochs)
+
+
+def train_vae(model, loader, optimizer, epochs=50, beta=0.7, use_cosine_lr=False, kl_warmup_epochs=0, 
+              perceptual_loss_fn=None, perceptual_weight=0.0):
     """Loop de treino do VAE — adaptado de train_vae (notebook 3)."""
     model.train()
     history = []
+    
+    # ── Scheduler (opcional) ──────────────────────────────────────────────────
+    if use_cosine_lr:
+        from torch.optim.lr_scheduler import CosineAnnealingLR
+        scheduler = CosineAnnealingLR(optimizer, T_max=epochs, eta_min=1e-5)
+    else:
+        scheduler = None
+    
     for ep in range(epochs):
-        tl = tr = tk = 0.0
-        for x, _ in tqdm(loader, desc=f'Epoch {ep+1}/{epochs}', leave=False):
+        tl = tr = tk = tp = 0.0
+        current_beta = get_kl_beta(ep, kl_warmup_epochs, beta)
+        
+        for x, _ in tqdm(loader, desc=f'Epoch {ep+1}/{epochs} (β={current_beta:.4f})', leave=False):
             x = x.to(device)
             
-            # ANTES: optimizer.zero_grad()
-            # DEPOIS: set_to_none=True
-            # MOTIVO: Evita gerir memória com matrizes completas de float 0.0, apontando apenas as memórias dos gradientes como nulas. Em GPUs tipo MPS e M1/M4, acelera a alocação do retro-passo.
             optimizer.zero_grad(set_to_none=True)
             
             xhat, mu, logvar = model(x)
-            loss, recon, kl  = vae_loss(xhat, x, mu, logvar, beta)
+            result = vae_loss(xhat, x, mu, logvar, current_beta, LATENT_DIM, perceptual_loss_fn, perceptual_weight)
+            
+            if len(result) == 4:
+                loss, recon, kl, perc = result
+            else:
+                loss, recon, kl = result
+                perc = None
+                
             loss.backward()
             optimizer.step()
             
-            # ANTES: tl += loss.item() * x.size(0)
-            #        tr += recon.item() * x.size(0)
-            #        tk += kl.item()   * x.size(0)
-            # DEPOIS: Em vez de .item(), usamos .detach() a cada iteração individual.
-            # MOTIVO: O `.item()` obriga a Placa Gráfica a suspender-se e a parar iterativamente para dar o valor solto ao CPU. Com o `.detach()` o processamento ocorre ininterruptamente no GPU para maior it/s!
             tl += loss.detach() * x.size(0)
             tr += recon.detach() * x.size(0)
             tk += kl.detach() * x.size(0)
+            if perc is not None:
+                tp += perc.detach() * x.size(0)
             
         n = len(loader.dataset)
         
-        # Só chamamos e exigimos o update do .item() ao CPU apenas no Final de casa Epoch estatístico!
         epoch_loss  = (tl/n).item()
         epoch_recon = (tr/n).item()
         epoch_kl    = (tk/n).item()
+        epoch_perc  = (tp/n).item() if tp > 0 else 0.0
         
-        history.append({'loss': epoch_loss, 'recon': epoch_recon, 'kl': epoch_kl})
-        print(f'Epoch {ep+1:03d}/{epochs} | loss={epoch_loss:.4f}  recon={epoch_recon:.4f}  kl={epoch_kl:.4f}')
+        history.append({'loss': epoch_loss, 'recon': epoch_recon, 'kl': epoch_kl, 'perc': epoch_perc})
+        
+        if epoch_perc > 0:
+            print(f'Epoch {ep+1:03d}/{epochs} | loss={epoch_loss:.4f}  recon={epoch_recon:.4f}  kl={epoch_kl:.4f}  perc={epoch_perc:.4f}')
+        else:
+            print(f'Epoch {ep+1:03d}/{epochs} | loss={epoch_loss:.4f}  recon={epoch_recon:.4f}  kl={epoch_kl:.4f}')
+        
+        # Step scheduler após cada epoch
+        if scheduler is not None:
+            scheduler.step()
         
         # amostras intermédias
         if cfg.save_samples and (ep + 1) % 10 == 0:
@@ -280,7 +371,22 @@ optimizer = torch.optim.Adam(model.parameters(), lr=LR)
 
 if __name__ == '__main__':
     # ## 5. Treino
-    history = train_vae(model, train_loader, optimizer, epochs=EPOCHS, beta=BETA)
+    # Initialize perceptual loss if requested
+    perceptual_loss_fn = None
+    perceptual_weight = 0.0
+    try:
+        perceptual_weight = float(USE_PERCEPTUAL_LOSS) if USE_PERCEPTUAL_LOSS != '0' else 0.0
+    except:
+        perceptual_weight = 0.0
+    
+    if perceptual_weight > 0:
+        print(f"Initializing Perceptual Loss with weight {perceptual_weight}...")
+        perceptual_loss_fn = PerceptualLoss(device)
+        print("✓ Perceptual Loss initialized")
+    
+    history = train_vae(model, train_loader, optimizer, epochs=EPOCHS, beta=BETA, 
+                       use_cosine_lr=USE_COSINE_LR, kl_warmup_epochs=KL_ANNEALING_EPOCHS,
+                       perceptual_loss_fn=perceptual_loss_fn, perceptual_weight=perceptual_weight)
     torch.save(model.state_dict(), OUT_DIR / 'vae_checkpoint.pth')
     print('Checkpoint guardado.')
 

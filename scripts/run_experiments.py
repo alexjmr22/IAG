@@ -86,6 +86,90 @@ EXPERIMENTS = {
         {'id': 'vae_combo_full',   'target': 'VAE', 'env': {'RUN_PROFILE':'DEV', 'VAE_BETA': '0.1', 'VAE_LATENT_DIM': '64',  'VAE_LR': '5e-3'}},
         # 8. Combo agressivo: aposta no LR mais alto + beta mínimo + lat=64
         {'id': 'vae_combo_bold',   'target': 'VAE', 'env': {'RUN_PROFILE':'DEV', 'VAE_BETA': '0.05', 'VAE_LATENT_DIM': '64', 'VAE_LR': '5e-3'}},
+    ],
+    '6': [ # PC 6 — Ronda 3: VAE pragmatic tests (30 + 50 epochs)
+        # TESTE 1: LR effect (β=0.1, lr=2e-3, e=30) — Compara com vae_beta01 (lr=1e-3)
+        {'id': 'vae_r3_beta01_lat128_lr2e3_e30', 'target': 'VAE', 'env': {'RUN_PROFILE':'DEV', 'VAE_BETA': '0.1', 'VAE_LATENT_DIM': '128', 'VAE_LR': '2e-3'}},
+        
+        # TESTE 2: β refinement (β=0.15, lr=2e-3, e=30) — Posiciona β entre 0.1 e 0.2
+        {'id': 'vae_r3_beta015_lat128_lr2e3_e30', 'target': 'VAE', 'env': {'RUN_PROFILE':'DEV', 'VAE_BETA': '0.15', 'VAE_LATENT_DIM': '128', 'VAE_LR': '2e-3'}},
+        
+        # TESTE 3: Epochs effect (β=0.1, lr=2e-3, e=50) — Valida se 50 epochs melhora vs 30
+        {'id': 'vae_r3_beta01_lat128_lr2e3_e50', 'target': 'VAE', 'env': {'RUN_PROFILE':'DEV', 'VAE_BETA': '0.1', 'VAE_LATENT_DIM': '128', 'VAE_LR': '2e-3', 'VAE_EPOCHS': '50'}},
+    ],
+    '7': [ # PC 7 — Ronda 5: Schedulers + Nova Arquiteturas (β=0.1, lat=128, lr=2e-3, 50-100 ep)
+        # T1: β-VAE Baseline (sem schedulers, 100 epochs para comparação)
+        {'id': 'vae_r5_t1_baseline_100ep', 'target': 'VAE', 'env': {'RUN_PROFILE':'DEV', 'VAE_BETA': '0.1', 'VAE_LATENT_DIM': '128', 'VAE_LR': '2e-3', 'VAE_EPOCHS': '100'}},
+        
+        # T2: β-VAE + Cosine Annealing LR (50 epochs)
+        {'id': 'vae_r5_t2_cosine', 'target': 'VAE', 'env': {'RUN_PROFILE':'DEV', 'VAE_BETA': '0.1', 'VAE_LATENT_DIM': '128', 'VAE_LR': '2e-3', 'VAE_EPOCHS': '50', 'VAE_COSINE_LR': 'true'}},
+        
+        # T3: β-VAE + KL Annealing (50 epochs)
+        {'id': 'vae_r5_t3_kl_annealing', 'target': 'VAE', 'env': {'RUN_PROFILE':'DEV', 'VAE_BETA': '0.1', 'VAE_LATENT_DIM': '128', 'VAE_LR': '2e-3', 'VAE_EPOCHS': '50', 'VAE_KL_ANNEALING_EPOCHS': '10'}},
+        
+        # T4: β-VAE + Cosine + KL Annealing (Both, 50 epochs)
+        {'id': 'vae_r5_t4_both', 'target': 'VAE', 'env': {'RUN_PROFILE':'DEV', 'VAE_BETA': '0.1', 'VAE_LATENT_DIM': '128', 'VAE_LR': '2e-3', 'VAE_EPOCHS': '50', 'VAE_COSINE_LR': 'true', 'VAE_KL_ANNEALING_EPOCHS': '10'}},
+        
+        # T5: CVAE (Conditional VAE, 50 epochs)
+        {'id': 'cvae_r5_t5_conditional', 'target': 'CVAE', 'env': {'RUN_PROFILE':'DEV', 'VAE_BETA': '0.1', 'VAE_LATENT_DIM': '128', 'VAE_LR': '2e-3', 'VAE_EPOCHS': '50', 'VAE_COSINE_LR': 'true', 'VAE_KL_ANNEALING_EPOCHS': '10'}},
+        
+        # T6: VQ-VAE (Vector Quantized VAE, 50 epochs)
+        {'id': 'vq_vae_r5_t6_quantized', 'target': 'VQ_VAE', 'env': {'RUN_PROFILE':'DEV', 'VAE_LATENT_DIM': '128', 'VAE_LR': '2e-3', 'VAE_EPOCHS': '50', 'VAE_COSINE_LR': 'true'}},
+    ],
+    '8': [ # PC 8 — Ronda 5 Final: 6 testes com fixes críticos (VAE_KL normalization, Cosine LR, KL Annealing, Perceptual Loss)
+        # T1: β-VAE Baseline 150 epochs (FID esperado: 130-140)
+        {'id': 'vae_r5_final_t1_baseline_150ep', 'target': 'VAE', 'env': {'RUN_PROFILE':'DEV', 'VAE_BETA': '0.1', 'VAE_LATENT_DIM': '128', 'VAE_LR': '0.002', 'VAE_EPOCHS': '150'}},
+        
+        # T2: β-VAE + Cosine LR (FID esperado: 135-142)
+        {'id': 'vae_r5_final_t2_cosine_100ep', 'target': 'VAE', 'env': {'RUN_PROFILE':'DEV', 'VAE_BETA': '0.1', 'VAE_LATENT_DIM': '128', 'VAE_LR': '0.002', 'VAE_EPOCHS': '150', 'VAE_COSINE_LR': 'true'}},
+        
+        # T3: β-VAE + KL Annealing (FIX para bug de warmup) (FID esperado: 128-138)
+        {'id': 'vae_r5_final_t3_kl_annealing_fixed', 'target': 'VAE', 'env': {'RUN_PROFILE':'DEV', 'VAE_BETA': '0.1', 'VAE_LATENT_DIM': '128', 'VAE_LR': '0.002', 'VAE_EPOCHS': '150', 'VAE_KL_ANNEALING_EPOCHS': '15'}},
+        
+        # T4: β-VAE + Cosine LR + KL Annealing (Both fixes) (FID esperado: 120-130)
+        {'id': 'vae_r5_final_t4_cosine_kl_both', 'target': 'VAE', 'env': {'RUN_PROFILE':'DEV', 'VAE_BETA': '0.1', 'VAE_LATENT_DIM': '128', 'VAE_LR': '0.002', 'VAE_EPOCHS': '150', 'VAE_COSINE_LR': 'true', 'VAE_KL_ANNEALING_EPOCHS': '15'}},
+        
+        # T5: β-VAE + Perceptual Loss (λ=0.1) (FID esperado: 115-125)
+        {'id': 'vae_r5_final_t5_perceptual_loss', 'target': 'VAE', 'env': {'RUN_PROFILE':'DEV', 'VAE_BETA': '0.1', 'VAE_LATENT_DIM': '128', 'VAE_LR': '0.002', 'VAE_EPOCHS': '150', 'VAE_PERCEPTUAL_LOSS': '0.1'}},
+        
+        # T8: β-VAE + ALL Techniques (Cosine + KL Annealing + Perceptual) (FID esperado: 110-120)
+        {'id': 'vae_r5_final_t8_all_techniques', 'target': 'VAE', 'env': {'RUN_PROFILE':'DEV', 'VAE_BETA': '0.1', 'VAE_LATENT_DIM': '128', 'VAE_LR': '0.002', 'VAE_EPOCHS': '150', 'VAE_COSINE_LR': 'true', 'VAE_KL_ANNEALING_EPOCHS': '15', 'VAE_PERCEPTUAL_LOSS': '0.1'}},
+    ],
+    '9': [ # PC 9 — Ronda 5b: Corrected Baseline + Core Techniques (KL fixed, no Cosine)
+        # T1: β-VAE Corrected Baseline (150 epochs, β=0.1, KL properly normalized)
+        {'id': 'vae_r5_corrected_t1_baseline', 'target': 'VAE', 'env': {'RUN_PROFILE':'DEV', 'VAE_BETA': '0.1', 'VAE_LATENT_DIM': '128', 'VAE_LR': '0.002', 'VAE_EPOCHS': '150'}},
+        
+        # T2: T1 + KL Annealing (35 epochs) — Bowman et al 2016 (prevents posterior collapse)
+        {'id': 'vae_r5_corrected_t2_kl_annealing', 'target': 'VAE', 'env': {'RUN_PROFILE':'DEV', 'VAE_BETA': '0.1', 'VAE_LATENT_DIM': '128', 'VAE_LR': '0.002', 'VAE_EPOCHS': '150', 'VAE_KL_ANNEALING_EPOCHS': '35'}},
+        
+        # T3: T1 + Perceptual Loss (λ=0.1) — Johnson et al 2016 (improves visual quality)
+        {'id': 'vae_r5_corrected_t3_perceptual', 'target': 'VAE', 'env': {'RUN_PROFILE':'DEV', 'VAE_BETA': '0.1', 'VAE_LATENT_DIM': '128', 'VAE_LR': '0.002', 'VAE_EPOCHS': '150', 'VAE_PERCEPTUAL_LOSS': '0.1'}},
+        
+        # T4: T1 + Both Techniques (KL Annealing + Perceptual) — Combined improvements
+        {'id': 'vae_r5_corrected_t4_both_techniques', 'target': 'VAE', 'env': {'RUN_PROFILE':'DEV', 'VAE_BETA': '0.1', 'VAE_LATENT_DIM': '128', 'VAE_LR': '0.002', 'VAE_EPOCHS': '150', 'VAE_KL_ANNEALING_EPOCHS': '35', 'VAE_PERCEPTUAL_LOSS': '0.1'}},
+    ],
+    '10': [ # PC 10 — Ronda 5c: Simple β Tuning + Optimized Alternative Architectures (150 epochs VAE, 100 epochs alternatives, original KL)
+        # T1: β=0.05 (fraco) — β mais pequeno porque KL original é já forte
+        {'id': 'vae_r5_simple_t1_beta005', 'target': 'VAE', 'env': {'RUN_PROFILE':'DEV', 'VAE_BETA': '0.05', 'VAE_LATENT_DIM': '128', 'VAE_LR': '0.002', 'VAE_EPOCHS': '150'}},
+        
+        # T2: β=0.1 (original) — baseline para comparação (confirmação de PC7 T1)
+        {'id': 'vae_r5_simple_t2_beta01', 'target': 'VAE', 'env': {'RUN_PROFILE':'DEV', 'VAE_BETA': '0.1', 'VAE_LATENT_DIM': '128', 'VAE_LR': '0.002', 'VAE_EPOCHS': '150'}},
+        
+        # T3: β=0.02 (muito fraco) — explorar regularização mínima
+        {'id': 'vae_r5_simple_t3_beta002', 'target': 'VAE', 'env': {'RUN_PROFILE':'DEV', 'VAE_BETA': '0.02', 'VAE_LATENT_DIM': '128', 'VAE_LR': '0.002', 'VAE_EPOCHS': '150'}},
+        
+        # T4: CVAE Optimized (Conditional VAE, 100 epochs, β=0.15) — condicionalidade require β mais forte
+        {'id': 'vae_r5_optimized_t4_cvae_beta015', 'target': 'CVAE', 'env': {'RUN_PROFILE':'DEV', 'VAE_BETA': '0.15', 'VAE_LATENT_DIM': '128', 'VAE_LR': '0.002', 'VAE_EPOCHS': '100'}},
+        
+        # T5: VQ-VAE Optimized (Vector Quantized VAE, 100 epochs, lr=5e-3) — quantização é mais estável com LR mais alto, sem β
+        {'id': 'vae_r5_optimized_t5_vqvae_lr005', 'target': 'VQ_VAE', 'env': {'RUN_PROFILE':'DEV', 'VAE_LATENT_DIM': '128', 'VAE_LR': '0.005', 'VAE_EPOCHS': '100'}},
+    ],
+    '11': [ # PC 11 — PRODUÇÃO: Top 2 Vencedores (para deployment, dataset completo, 200 épocas)
+        # T1: VAE Champion (β=0.05, 200 epochs) — BEST FID 140.22 @ 150ep, esperado melhor @ 200ep
+        {'id': 'vae_prod_champion_beta005', 'target': 'VAE', 'env': {'RUN_PROFILE':'PROD', 'VAE_BETA': '0.05', 'VAE_LATENT_DIM': '128', 'VAE_LR': '0.002', 'VAE_EPOCHS': '200'}},
+        
+        # T2: VAE Runner-Up (β=0.1, 200 epochs) — Runner-up FID 141.28 @ 150ep, esperado melhor @ 200ep
+        {'id': 'vae_prod_runnerup_beta01', 'target': 'VAE', 'env': {'RUN_PROFILE':'PROD', 'VAE_BETA': '0.1', 'VAE_LATENT_DIM': '128', 'VAE_LR': '0.002', 'VAE_EPOCHS': '200'}},
     ]
 }
 
@@ -102,7 +186,7 @@ def run_script(script_path, extra_env):
     env = os.environ.copy()
     # 2. Limpar variáveis de experimento para não contaminar runs sem essa var definida
     _exp_vars = [
-        'VAE_LATENT_DIM', 'VAE_BETA', 'VAE_LR',
+        'VAE_LATENT_DIM', 'VAE_BETA', 'VAE_LR', 'VAE_EPOCHS', 'VAE_COSINE_LR', 'VAE_KL_ANNEALING_EPOCHS', 'VAE_PERCEPTUAL_LOSS',
         'DCGAN_LATENT', 'DCGAN_NGF', 'DCGAN_NDF', 'DCGAN_BETA1', 'DCGAN_LR',
         'DIFF_CHANNELS', 'DIFF_T_STEPS', 'DIFF_LR', 'DIFF_BETA_START', 'DIFF_BETA_END',
     ]
@@ -123,7 +207,7 @@ def run_script(script_path, extra_env):
 
 def main():
     parser = argparse.ArgumentParser(description="Grid Search Automated Orchestrator")
-    parser.add_argument('--pc', type=str, required=True, choices=['1', '2', '3', '4', '5'], help="ID do Computador (1, 2, 3, 4, ou 5)")
+    parser.add_argument('--pc', type=str, required=True, choices=['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11'], help="ID do Computador (1-11, 11=PROD)")
     args = parser.parse_args()
 
     pc_experiments = EXPERIMENTS[args.pc]
@@ -146,6 +230,10 @@ def main():
         
         if target == 'VAE':
             run_script(root_dir / 'scripts' / '01_vae.py', exp_env)
+        elif target == 'CVAE':
+            run_script(root_dir / 'scripts' / '03_cvae.py', exp_env)
+        elif target == 'VQ_VAE':
+            run_script(root_dir / 'scripts' / '04_vq_vae.py', exp_env)
         elif target == 'DCGAN':
             run_script(root_dir / 'scripts' / '02_dcgan.py', exp_env)
         elif target == 'Diffusion':
