@@ -68,3 +68,12 @@ data/**/*.jpeg
 !DIFF_ate_65fid/**/*.csv
 !DIFF_ate_65fid/**/*.pth
 !DIFF_ate_65fid/**/*.pt
+# Ignore archives and macOS specific files
+*.zip
+*.tar.gz
+*.tar
+*.rar
+*.7z
+.DS_Store
+__MACOSX/
+**/._*
