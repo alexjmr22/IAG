@@ -1,0 +1,641 @@
+\documentclass[runningheads]{llncs}
+
+\usepackage[T1]{fontenc}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\let\vec\relax          % prevent llncs/amsmath \vec redefinition clash
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{multirow}
+\usepackage{xcolor}
+\usepackage[pdfusetitle=false]{hyperref}
+\hypersetup{pdftitle={ArtBench Generative Modeling: A Comparative Study of VAEs, GANs, and Diffusion Models}}
+
+\begin{document}
+
+\title{ArtBench Generative Modeling:\texorpdfstring{\\}{ }A Comparative Study of VAEs, GANs, and Diffusion Models}
+
+\author{Alexandre Rodrigues\inst{1} \and
+Duarte Pereira\inst{1}}
+
+\authorrunning{A. Rodrigues et D. Pereira.}
+
+\institute{Faculdade de Ciências e Tecnologia, Universidade de Coimbra, Portugal\\
+\email{2022236193@student.uc.pt, xxx@student.uc.pt}}
+
+\maketitle
+
+% ---------------------------------------------------------------
+\begin{abstract}
+We present a systematic study of three families of deep generative models —
+Variational Autoencoders (VAEs), Deep Convolutional GANs (DCGANs), and Denoising
+Diffusion Probabilistic Models (DDPMs) — trained and evaluated on the ArtBench-10
+dataset of 32$\times$32 artwork images spanning ten distinct artistic styles.
+Hyperparameter search was conducted across 45+ VAE configurations over nine experimental
+rounds and 35+ GAN configurations, followed by full-dataset retraining of the best
+configuration per family.
+All models are evaluated under a unified protocol: Fréchet Inception Distance (FID)
+and Kernel Inception Distance (KID) computed over 5\,000 generated versus 5\,000
+real images, repeated across ten independent random seeds.
+The VAE achieves FID\,=\,145.85 on the full dataset with $\beta = 0.05$; the ablation
+over $\beta \in \{0, 0.02, 0.05, 0.1, 0.2, 0.5, 0.7, 1.0, 2.0\}$ reveals a
+U-shaped FID curve with a robust optimum at $\beta \in [0.05,\,0.1]$, well below
+the standard $\beta = 1$ formulation. The DCGAN with Spectral Normalization trained
+for 200 epochs achieves FID\,$\approx$\,28.1, and the Diffusion model with EMA and
+DDIM sampling achieves FID\,=\,28.97 and KID\,=\,0.0144\,---\,both substantially
+outperforming the VAE and demonstrating that, at 32$\times$32 resolution, a well-tuned
+GAN is competitive with state-of-the-art diffusion models.
+\keywords{Generative Models \and Variational Autoencoders \and GANs \and Diffusion Models \and ArtBench \and FID \and KID \and Hyperparameter Search}
+\end{abstract}
+
+% ---------------------------------------------------------------
+\section{Introduction}
+
+Generative modeling of visual art presents a distinctive challenge: unlike natural image datasets, artwork images exhibit strong stylistic structure, high intra-class variability, and no privileged semantic object to anchor the distribution. A model generating Impressionist paintings must capture abstract brushstroke patterns, color palettes, and compositional conventions that vary widely even within a single style — a fundamentally harder task than modeling natural images where consistent object priors exist.
+
+The ArtBench-10 dataset~\cite{liao2022} was specifically designed to benchmark generative models in this domain. It comprises 50\,000 training images from ten distinct artistic styles at $32{\times}32$ resolution, providing a controlled setting for evaluating sample quality, diversity, and style consistency simultaneously.
+
+This work presents a systematic comparison of three families of deep generative models on ArtBench-10: Variational Autoencoders (VAEs)~\cite{kingma2013}, Deep Convolutional GANs (DCGANs)~\cite{radford2015}, and Denoising Diffusion Probabilistic Models (DDPMs)~\cite{ho2020}. Beyond the three mandatory baselines, we explore extensions including Spectral Normalization~\cite{miyato2018}, WGAN-GP~\cite{gulrajani2017}, conditional DCGAN~\cite{sohn2015}, StyleGAN~\cite{karras2018}, DDIM sampling~\cite{song2020}, Exponential Moving Average, Conditional VAE, and VQ-VAE~\cite{oord2017}.
+
+Hyperparameter selection follows a principled five-phase strategy — univariate sweep, directed refinement, validation, advanced techniques, and production — applied consistently across all model families. The goal is not merely to report best results, but to understand \emph{why} each configuration performs as it does, enabling principled transfer to new settings. Over 80 independent training runs were conducted in total.
+
+The remainder of this report is organized as follows. Section~\ref{sec:problem} formalizes the problem. Section~\ref{sec:methodology} details architectures and training strategies. Section~\ref{sec:setup} specifies the experimental setup. Section~\ref{sec:results} presents ablation studies and final comparisons. Section~\ref{sec:discussion} analyzes model trade-offs. Section~\ref{sec:conclusion} summarizes findings and future directions.
+
+% ---------------------------------------------------------------
+\section{Problem Statement}\label{sec:problem}
+
+The task is \emph{unconditional image generation}: learn a model capable of sampling new images statistically indistinguishable from the real data distribution. Quality is assessed both visually and through distribution-level metrics, since there is no ground-truth label to predict.
+
+The challenge specific to artistic imagery is threefold. First, \emph{visual fidelity}: generated samples must exhibit coherent structure, color, and texture. Second, \emph{diversity}: the model must not collapse to a small set of repeated patterns. Third, \emph{style plausibility}: samples should plausibly belong to the broad distribution of painted artworks.
+
+\subsection{Dataset}
+
+ArtBench-10~\cite{liao2022} comprises images from ten artistic styles: Baroque, Expressionism, Impressionism, Post-Impressionism, Realism, Renaissance, Romanticism, Surrealism, Ukiyo-e, and Art Nouveau. Each style contains 5\,000 training samples (50\,000 total), yielding a balanced multi-class distribution.
+
+\begin{itemize}
+    \item \textbf{Image resolution:} $32 \times 32$ RGB
+    \item \textbf{Training set:} 50\,000 images (5\,000 per class)
+    \item \textbf{Test set:} 10\,000 images
+\end{itemize}
+
+During model development, a fixed 20\% stratified subset (10\,000 images, specified by a fixed CSV from the project specification) is used for architecture search and hyperparameter tuning, ensuring reproducibility across machines. The best configuration per model family is then retrained on the full 50\,000-image set for final evaluation.
+
+\noindent\textbf{Preprocessing.} All images are resized to $32 \times 32$ via bilinear interpolation, center-cropped, converted to tensors, and normalized to $[-1, 1]$ per channel (mean 0.5, std 0.5). No data augmentation is applied, ensuring metrics reflect generalization rather than augmentation effects.
+
+% ---------------------------------------------------------------
+\section{Methodology}\label{sec:methodology}
+
+\subsection{Variational Autoencoder (VAE)}
+
+A Variational Autoencoder~\cite{kingma2013} trains an encoder $q_\phi(z|x)$ and decoder $p_\theta(x|z)$ jointly. The encoder maps input $x$ to a diagonal Gaussian $q_\phi(z|x) = \mathcal{N}(\mu_\phi(x),\,\sigma^2_\phi(x)I)$; a latent sample is drawn via the reparameterization trick $z = \mu + \varepsilon\sigma$, $\varepsilon \sim \mathcal{N}(0, I)$, enabling gradient flow through the sampling operation.
+
+\subsubsection{Architecture.}
+
+The model (ConvVAE) is adapted from the course notebook 3, originally designed for MNIST (1 channel, 28$\times$28) and extended for ArtBench-10 (3-channel RGB, 32$\times$32):
+
+\begin{table}[htbp]
+\caption{ConvVAE architecture ($d=128$, $\approx$1.05M parameters).}\label{tab:vae_arch}
+\centering
+\begin{tabular}{lll}
+\toprule
+Component & Layers & Details \\
+\midrule
+Encoder   & 3$\times$ Conv2d (stride=2) + BN + ReLU & $32{\to}16{\to}8{\to}4$ (bottleneck $4{\times}4{\times}128$) \\
+Latent proj. & 2$\times$ Linear ($2048 \to d$) & Produces $\mu$ and $\log\sigma^2$ \\
+Reparam. & $z = \mu + \varepsilon\sigma$, $\varepsilon \sim \mathcal{N}(0,I)$ & Straight-through gradient \\
+Decoder   & Linear + 3$\times$ ConvTranspose2d + Tanh & $4{\to}8{\to}16{\to}32$ in $[-1,1]$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsubsection{Training Objective.}
+
+Training minimises the $\beta$-VAE objective~\cite{higgins2017}:
+
+\begin{equation}
+\mathcal{L} = \underbrace{\frac{1}{N}\sum_{i=1}^{N} \|x_i - \hat{x}_i\|^2}_{\text{reconstruction (MSE)}}
++ \;\beta \cdot \underbrace{\left(-\frac{1}{2N}\sum_{i=1}^{N}\sum_{j=1}^{d}\!\left(1 + \log\sigma_{ij}^2 - \mu_{ij}^2 - \sigma_{ij}^2\right)\right)}_{\text{KL divergence}}
+\label{eq:bvae}
+\end{equation}
+
+Both terms are normalized by batch size $N$ (without per-dimension normalization of the KL). The KL term regularizes the aggregate posterior towards $\mathcal{N}(0,I)$, ensuring the latent space supports ancestral sampling. The scalar $\beta$ controls the reconstruction–regularity trade-off; $\beta=1$ recovers the standard VAE~\cite{kingma2013}, while $\beta<1$ relaxes the Gaussian constraint and prioritizes reconstruction quality.
+
+\noindent\textbf{Normalization convention.} Dividing the KL only by $N$ (not $N \times d$) means the effective KL weight scales with $d$: for $d=128$, $\beta=0.1$ under our convention is equivalent to a per-dimension weight of $0.1 \times 128 = 12.8$. This choice follows the notebook implementation from the course and is empirically calibrated. Its implications are discussed in Section~\ref{sec:kl_norm}.
+
+\subsubsection{VAE Extension Architectures.}
+
+\noindent\textbf{Conditional VAE (CVAE).} Extends the VAE by conditioning encoder and decoder on the class label $y$ (one of 10 ArtBench styles) via a learned embedding~\cite{sohn2015}. The embedding is concatenated to the encoder's convolutional representation before the latent projection, and to the latent vector $z$ at the decoder's input, enabling directed style-conditioned synthesis at inference time.
+
+\noindent\textbf{VQ-VAE.} Replaces the continuous Gaussian latent with a discrete codebook $\{e_k\}_{k=1}^{K}$ ($K=256$)~\cite{oord2017}. The encoder output is quantized to the nearest entry via $k^* = \arg\min_k \|z_e - e_k\|_2$, using a straight-through estimator for gradients. The loss adds a commitment term $\gamma\|\mathrm{sg}(z_e) - z_q\|^2$ ($\gamma=0.25$), with no KL regularization.
+
+\subsubsection{Hyperparameter Search Strategy.}\label{sec:vae_search}
+
+The search followed five sequential phases: (1)~\textbf{univariate sweep} of $\beta$, $d$, and lr individually, holding others at the notebook default; (2)~\textbf{directed refinement} of promising regions and testing hyperparameter combinations; (3)~\textbf{validation} with lr$=2{\times}10^{-3}$ and extended epochs; (4)~\textbf{advanced techniques} (cosine LR annealing, KL annealing); (5)~\textbf{production} training on the full dataset with the winning configuration. In total, 45+ VAE configurations were evaluated.
+
+% ---------------------------------------------------------------
+\subsection{Generative Adversarial Networks}\label{sec:gans}
+
+GANs~\cite{radford2015} frame image synthesis as a minimax game:
+
+\begin{equation}
+\min_G \max_D \; \mathbb{E}_{x \sim p_\text{data}}[\log D(x)] + \mathbb{E}_{z \sim p_z}[\log(1 - D(G(z)))]
+\end{equation}
+
+\subsubsection{DCGAN Architecture.}
+
+The generator maps $z \in \mathbb{R}^{100}$ through four fractionally-strided convolutions:
+
+\begin{equation}
+(100,1,1) \xrightarrow{\text{ConvT}} (4N,4,4) \xrightarrow{\text{ConvT}} (2N,8,8) \xrightarrow{\text{ConvT}} (N,16,16) \xrightarrow{\text{ConvT}} (3,32,32)
+\end{equation}
+
+with Batch Normalization and ReLU at each intermediate layer, Tanh at the output. The discriminator mirrors this with strided convolutions, Batch Normalization, and LeakyReLU ($\alpha=0.2$). Weights are initialized from $\mathcal{N}(0,0.02)$ for convolutions and $\mathcal{N}(1,0.02)$ for BN. Both networks use Adam with $\beta_1=0.5$ — lower than the standard 0.9 to reduce momentum oscillations intrinsic to adversarial training.
+
+\subsubsection{Spectral Normalization.}
+
+Spectral Normalization~\cite{miyato2018} normalizes each discriminator weight matrix by its spectral norm $\sigma_{\max}$:
+\begin{equation}
+\hat{W}_\text{SN} = W / \sigma_{\max}(W)
+\end{equation}
+enforcing a 1-Lipschitz bound on $D$ without additional hyperparameters. This keeps gradients reaching $G$ well-conditioned throughout long training runs.
+
+\subsubsection{Extended GAN Variants.}\label{sec:gan_extensions}
+
+\noindent\textbf{WGAN-GP}~\cite{gulrajani2017}: replaces BCE with the Wasserstein-1 distance, enforcing the Lipschitz condition via gradient penalty $\lambda\,\mathbb{E}_{\hat{x}}\!\left[(\|\nabla_{\hat{x}} C(\hat{x})\|_2-1)^2\right]$, $\lambda=10$. The critic is updated $n_\text{critic}=5$ times per generator step. We also tested $n_\text{critic}=2$ and cosine LR scheduling.
+
+\noindent\textbf{Conditional DCGAN (cDCGAN)}~\cite{sohn2015}: injects a learned style-label embedding into the generator input and discriminator first layer, enabling class-directed synthesis.
+
+\noindent\textbf{StyleGAN}~\cite{karras2018}: an 8-layer mapping network transforms $z \in \mathbb{R}^{512}$ into a style code $w \in \mathbb{R}^{512}$ injected into each synthesis layer via Adaptive Instance Normalization (AdaIN). Style mixing regularization encourages layer-wise specialization. Evaluated with $\mathit{ngf} \in \{64, 128\}$ and 100/200 epochs.
+
+% ---------------------------------------------------------------
+\subsection{Diffusion Model}\label{sec:diffusion}
+
+DDPMs~\cite{ho2020} reverse a fixed Markov noising process. The forward process corrupts $x_0$:
+
+\begin{equation}
+x_t = \sqrt{\bar{\alpha}_t}\,x_0 + \sqrt{1-\bar{\alpha}_t}\,\varepsilon,\quad \varepsilon \sim \mathcal{N}(0,I),\quad \bar{\alpha}_t = \prod_{s=1}^{t}(1-\beta_s)
+\end{equation}
+
+using a linear schedule ($\beta_1=10^{-4}$, $\beta_T=0.02$, $T=1000$).
+
+\subsubsection{Network Architecture.}
+
+A pixel-space U-Net (PixelUNet) with $C=96$ channels ($\approx$10.5M parameters). A sinusoidal timestep embedding is projected through a two-layer MLP ($\mathbb{R} \to \mathbb{R}^{4C}$) and injected additively into each ResnetBlock after the first convolution. The encoder uses strided convolutions and the decoder uses transposed convolutions with skip connections; each ResnetBlock applies GroupNorm(4) + SiLU before each convolution.
+
+\subsubsection{Training and Sampling.}
+
+Trained with the $\varepsilon$-prediction objective: $\mathcal{L} = \mathbb{E}_{x_0,t,\varepsilon}\!\left[\|\varepsilon - \varepsilon_\theta(x_t,t)\|^2\right]$. Adam with lr$=4{\times}10^{-4}$, linear warmup (10 epochs), cosine decay. EMA of weights with decay $=0.9999$; only EMA weights used at inference. Sampling via DDIM~\cite{song2020} with 100 steps ($\eta=0$), achieving a $10{\times}$ speedup over DDPM-1000.
+
+% ---------------------------------------------------------------
+\subsection{Additional Models}\label{sec:extra}
+
+The $\beta$-VAE, CVAE, and VQ-VAE are described above. WGAN-GP, cDCGAN, and StyleGAN are in Section~\ref{sec:gan_extensions}. A \emph{Latent Diffusion Model} (LDM)~\cite{rombach2022} stub was implemented — compressing images to $4{\times}4$ latents via the VAE encoder before diffusion — but full training was infeasible within the compute budget; we estimate FID\,$<$\,20 would be achievable.
+
+% ---------------------------------------------------------------
+\section{Experimental Setup}\label{sec:setup}
+
+\subsection{Computational Environment}
+
+Experiments were distributed across three machines. GAN models: MacBook Air with Apple M4 SoC (MPS backend). Diffusion models: HP Omen with Intel Core i7-10750H + NVIDIA GeForce RTX 3060 (CUDA). VAE models: Apple M1 SoC (MPS). All machines: PyTorch 2.8.0, torchvision 0.23.0, Python 3. FID/KID computed via \texttt{torchmetrics} (InceptionV3, \texttt{feature=2048}); on MPS devices, metric computation was offloaded to CPU to avoid float64 precision issues.
+
+\subsection{Training Protocol and Evaluation Profiles}
+
+Two execution profiles were defined to balance iteration speed against evaluation rigour:
+
+\begin{table}[htbp]
+\caption{Execution profiles.}\label{tab:profiles}
+\centering
+\begin{tabular}{lllll}
+\toprule
+Profile & Dataset & Epochs (VAE) & Eval samples & Seeds \\
+\midrule
+DEV  & 20\% subset ($\approx$10\,000 imgs) & 30 (variable) & 2\,000 & 3 \\
+PROD & Full ArtBench-10 (50\,000 imgs)    & 200           & 5\,000 & 10 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+All models share batch size 128 and Adam optimizer. A custom orchestrator (\texttt{run\_experiments.py}) injected hyperparameter configurations via environment variables and triggered evaluation automatically after each run, producing training curves, generated samples, reconstructions, latent interpolations, checkpoints, and FID/KID metrics per experiment.
+
+\subsection{Hyperparameter Search Space (VAE)}
+
+\begin{table}[htbp]
+\caption{VAE hyperparameter search space and results.}\label{tab:vae_search}
+\centering
+\begin{tabular}{llll}
+\toprule
+Hyperparameter & Values tested & Default (notebook) & Best found \\
+\midrule
+$\beta$ (KL weight) & 0.0, 0.02, 0.05, 0.1, 0.15, 0.2, 0.5, 0.7, 1.0, 2.0 & 0.7 & \textbf{0.05} \\
+Latent dim $d$ & 16, 32, 64, 96, 128, 256 & 128 & \textbf{128} \\
+Learning rate & $10^{-4}$, $5{\times}10^{-4}$, $10^{-3}$, $2{\times}10^{-3}$, $5{\times}10^{-3}$, $10^{-2}$ & $10^{-3}$ & $\mathbf{2{\times}10^{-3}}$ \\
+Epochs & 30, 50, 100, 150, 200 & 30 & \textbf{150--200} \\
+Cosine LR annealing & true / false & false & \textbf{false} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Final Hyperparameters}
+
+\begin{table}[htbp]
+\caption{Final hyperparameters — best PROD configuration per model family.}\label{tab:hp_all}
+\centering
+\begin{tabular}{llll}
+\toprule
+Parameter & VAE & DCGAN+SN & Diffusion+EMA \\
+\midrule
+Batch size    & 128                    & 128                    & 128 \\
+Optimizer     & Adam                   & Adam                   & Adam \\
+Learning rate & $2{\times}10^{-3}$     & $2{\times}10^{-4}$     & $4{\times}10^{-4}$ \\
+$\beta_1$, $\beta_2$ & 0.9, 0.999      & 0.5, 0.999             & 0.9, 0.999 \\
+LR schedule   & —                      & —                      & Cosine + warmup (10 ep) \\
+Latent / $C$  & $d=128$                & lat$=$100, ngf/ndf$=$128 & $C=96$ ($\approx$10.5M) \\
+Model-specific & $\beta_{KL}=0.05$      & Spectral Norm (D only) & EMA decay$=$0.9999, DDIM-100 \\
+Epochs        & 200                    & 200                    & 200 \\
+Dataset       & Full (50\,000)         & Full (50\,000)         & Full (50\,000) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Evaluation Protocol}
+
+For each model, 5\,000 generated images are compared against 5\,000 randomly sampled real images:
+\begin{itemize}
+    \item \textbf{FID}~\cite{heusel2017}: Wasserstein-2 distance between multivariate Gaussians fitted to Inception-v3 pool$_3$ features (2048-d). Lower is better.
+    \item \textbf{KID}~\cite{binkowski2018}: Unbiased MMD$^2$ estimator computed on 50 random subsets of 100 images. Lower is better.
+\end{itemize}
+The full procedure repeats across 10 seeds ($\{42,\ldots,51\}$), each controlling real and fake image sampling. Results reported as mean $\pm$ std across seeds. Preprocessing and evaluation code are identical across all models.
+
+% ---------------------------------------------------------------
+\section{Results}\label{sec:results}
+
+\subsection{VAE Ablation Studies}\label{sec:ablation_vae}
+
+\subsubsection{Effect of the KL Weight $\beta$ — the Most Critical Hyperparameter.}
+
+Table~\ref{tab:vae_beta} consolidates FID results across the $\beta$ sweep, combining 30-epoch initial results (Rounds 1--2) with 150-epoch fine-tuned results (Round 5).
+
+\begin{table}[htbp]
+\caption{VAE ablation over $\beta$ ($d=128$, lr$=2{\times}10^{-3}$). 30 ep: 3 seeds, DEV; 150 ep: 3 seeds, DEV.}\label{tab:vae_beta}
+\centering
+\begin{tabular}{cccc}
+\toprule
+$\beta$ & FID (30 ep) $\downarrow$ & FID (150 ep) $\downarrow$ & KID (150 ep) $\downarrow$ \\
+\midrule
+0.0  & 336.76 $\pm$ 1.53 & — & — \\
+0.02 & — & 148.19 $\pm$ 1.14 & 0.1428 \\
+\textbf{0.05} & 205.11 $\pm$ 0.75 & \textbf{140.22 $\pm$ 1.38} & \textbf{0.1301} \\
+0.1  & 185.26 $\pm$ 0.59 & 141.28 $\pm$ 2.85 & 0.1292 \\
+0.2  & 187.86 $\pm$ 1.49 & — & — \\
+0.5  & 223.23 $\pm$ 1.93 & — & — \\
+0.7  & 241.58 $\pm$ 1.98 & — & — \\
+1.0  & 262.29 $\pm$ 3.02 & — & — \\
+2.0  & 316.29 $\pm$ 1.46 & — & — \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The FID-versus-$\beta$ curve is U-shaped with a stable optimum at $\beta \in [0.05,\,0.1]$, representing a swing of more than 150 FID points between the worst ($\beta=0$, FID\,=\,336) and best ($\beta=0.05$, FID\,=\,140) values.
+
+\textbf{At $\beta=0$ (pure autoencoder):} Without KL regularization, the encoder maps training images to arbitrary latent codes with no alignment to $\mathcal{N}(0,I)$. Regions of latent space never visited during training generate noise at the decoder output. Although reconstruction is excellent, ancestral sampling $z\sim\mathcal{N}(0,I)$ produces incoherent images — FID\,=\,336.
+
+\textbf{At $\beta \in [0.05,\,0.1]$ (optimal):} KL pressure is sufficient to organize the latent space without sacrificing reconstruction. The plateau is wide ($\beta=0.1$ and $\beta=0.2$ differ by only 2.6 FID at 30 epochs), providing robustness to the exact value chosen.
+
+\textbf{At $\beta \geq 0.5$ (over-regularization):} The KL term dominates, forcing $q(z|x) \approx \mathcal{N}(0,I)$ for all $x$. The decoder receives uninformative inputs and produces blurry dataset averages — the well-known \emph{posterior collapse}~\cite{bowman2016}.
+
+\textbf{Notebook default $\beta=0.7$ was suboptimal:} The notebook was designed for MNIST (1 channel, simple structure), where $\beta=0.7$ is appropriate. ArtBench-10, with 3-channel RGB and complex artistic textures, requires substantially weaker regularization. This result underscores the importance of validating hyperparameters empirically on the target dataset.
+
+\textbf{Non-monotone behavior at low $\beta$:} $\beta=0.02$ (FID\,=\,148) is \emph{worse} than $\beta=0.05$ (FID\,=\,140) at 150 epochs. Without sufficient KL pressure, the latent space remains too disorganized for clean sampling; this confirms a true minimum at $\beta \in [0.05,\,0.1]$ rather than a monotone improvement toward zero.
+
+\subsubsection{Effect of Latent Dimension.}
+
+\begin{table}[htbp]
+\caption{VAE ablation over $d$ (DEV; $\beta=0.7$, lr$=10^{-3}$, 30 epochs, 3 seeds).}\label{tab:vae_lat}
+\centering
+\begin{tabular}{ccc}
+\toprule
+$d$ & FID mean $\downarrow$ & KID mean $\downarrow$ \\
+\midrule
+16  & 356.26 & 0.3730 \\
+32  & 311.07 & 0.3261 \\
+64  & 234.08 & 0.2226 \\
+96  & 232.86 & 0.2201 \\
+128 & 241.06 & 0.2301 \\
+256 & 240.92 & 0.2327 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+FID decreases steeply from $d=16$ to $d=64$, then plateaus ($d=128$ vs.\ $d=256$: 0.1 FID difference). The counter-intuitive result that $d=64$ outperforms $d=128$ under $\beta=0.7$ is explained by the KL normalization: the total KL summed over all dimensions grows linearly with $d$, so $d=128$ effectively doubles the KL pressure relative to $d=64$ for the same $\beta$. Under $\beta=0.7$ (already excessive), this extra pressure is harmful. With $\beta=0.05$--$0.1$ (optimal), this pruning disappears and $d=128$ outperforms $d=64$ by 60 FID points — the $\beta$--$d$ interaction is non-additive.
+
+\subsubsection{Effect of Learning Rate.}
+
+\begin{table}[htbp]
+\caption{VAE ablation over lr (DEV; $d=128$, $\beta=0.7$, 30 epochs, 3 seeds).}\label{tab:vae_lr}
+\centering
+\begin{tabular}{ccc}
+\toprule
+Learning rate & FID mean $\downarrow$ & KID mean $\downarrow$ \\
+\midrule
+$10^{-4}$          & 443.73 & 0.5267 \\
+$5{\times}10^{-4}$ & 296.55 & 0.3110 \\
+$10^{-3}$          & 241.58 & 0.2310 \\
+$2{\times}10^{-3}$ & 207.36 & 0.1850 \\
+$5{\times}10^{-3}$ & 210.70 & 0.1891 \\
+$10^{-2}$          & 456.55 & 0.4414 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+LR$=10^{-4}$ fails to converge in 30 epochs (KID\,=\,0.527 indicates near-random samples). LR$=10^{-2}$ causes Adam to overshoot — the low FID std (1.29) shows consistent divergence, not noise. The optimal range LR\,$\in\,[2{\times}10^{-3},\,5{\times}10^{-3}]$; LR$=2{\times}10^{-3}$ is selected for the final configuration as the best balance of convergence speed and long-run stability.
+
+\subsubsection{Effect of Training Epochs.}
+
+\begin{table}[htbp]
+\caption{VAE FID versus epochs ($\beta=0.1$, lr$=2{\times}10^{-3}$, $d=128$, DEV, 3 seeds).}\label{tab:vae_epochs}
+\centering
+\begin{tabular}{cccc}
+\toprule
+Epochs & FID mean $\downarrow$ & FID std & $\Delta$FID/epoch \\
+\midrule
+30  & 169.62 & 1.84 & — \\
+50  & 157.73 & 1.42 & $-$0.59 \\
+100 & 146.13 & 2.02 & $-$0.23 \\
+150 & 141.28 & 2.85 & $-$0.10 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The marginal gain per epoch decreases monotonically, consistent with log-linear convergence: $\mathrm{FID}(t) \approx \mathrm{FID}_\infty + A\cdot e^{-t/\tau}$. Extrapolating suggests $\mathrm{FID}_\infty \approx 135$--$140$ — the capacity limit of this $\approx$1M-parameter architecture. This motivated the 200-epoch PROD run.
+
+\subsubsection{Cosine LR Annealing: A Negative Result.}\label{sec:cosine_vae}
+
+Cosine annealing with $T_\text{max}=50$~\cite{loshchilov2017} was tested against a fixed LR baseline:
+
+\begin{table}[htbp]
+\caption{Cosine LR annealing vs.\ fixed LR (VAE, $\beta=0.1$, $d=128$, lr$_0=2{\times}10^{-3}$, DEV).}\label{tab:cosine_vae}
+\centering
+\begin{tabular}{lcc}
+\toprule
+Configuration & Epochs & FID $\downarrow$ \\
+\midrule
+Fixed LR (baseline) & 50  & $\approx$158 \\
+Cosine annealing ($T_\text{max}=50$) & 50 & 164.26 \\
+Fixed LR & 100 & 146.13 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Cosine annealing \emph{hurt} performance ($+$6 FID at 50 epochs). The cause: with $T_\text{max}=50$, the LR falls below $10^{-4}$ after $\approx$epoch 35, effectively halting learning in the final 15 epochs. This contrasts sharply with the Diffusion model, where cosine decay over 100--200 epochs was transformative. The lesson is that cosine annealing is beneficial only when the training horizon is long enough for the low-LR refinement phase to converge, not stall. For VAEs at $<100$ epochs, a fixed LR is preferable.
+
+\subsubsection{KL Normalization: A Methodological Lesson.}\label{sec:kl_norm}
+
+During Round 5, an alternative KL normalization was tested: dividing by $N \times d$ (per Kingma \& Welling 2014, Eq. 10) instead of $N$ alone:
+
+\begin{table}[htbp]
+\caption{Effect of KL normalization convention ($\beta=0.1$, all else equal).}\label{tab:kl_norm}
+\centering
+\begin{tabular}{lcc}
+\toprule
+KL normalization & FID $\downarrow$ & Change \\
+\midrule
+$\div N$ (original) & 146.13 & — \\
+$\div (N \times d)$ & 285.53 & $+$139.4 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The ``corrected'' normalization catastrophically degraded FID. The reason: it reduced the effective $\beta$ by a factor of $d=128$, transforming the model into a near-pure autoencoder without latent regularization. This result demonstrates that \textbf{the absolute value of $\beta$ is meaningful only relative to the KL scale}: both normalization conventions are mathematically valid, but require different $\beta$ calibration. Changing the normalization without recalibrating $\beta$ is equivalent to changing $\beta$ by a factor of $d$. The investigation also surfaced two implementation bugs: an off-by-one in a KL warmup schedule~\cite{bowman2016} and a device mismatch in a perceptual loss prototype — confirming that empirical validation supersedes theoretical elegance in hyperparameter choices.
+
+\subsubsection{Effect of Hyperparameter Combinations.}
+
+Univariate optima do not combine additively. Table~\ref{tab:vae_combos} shows that $\beta=0.1$ with $d=64$ (combining the respective best values from each univariate sweep) yields FID\,=\,245 — 60 points worse than $\beta=0.1$ with $d=128$ (FID\,=\,185).
+
+\begin{table}[htbp]
+\caption{Selected hyperparameter combinations (DEV, 30 epochs, 3 seeds).}\label{tab:vae_combos}
+\centering
+\begin{tabular}{lccc}
+\toprule
+Configuration & $\beta$ & $d$ & FID $\downarrow$ \\
+\midrule
+Best $\beta$ sweep ($d=128$ default) & 0.1  & 128 & \textbf{185.26} \\
+$\beta=0.1$, $d=64$, lr$=10^{-3}$   & 0.1  & 64  & 245.22 \\
+$\beta=0.1$, $d=64$, lr$=5{\times}10^{-3}$ & 0.1 & 64 & 224.95 \\
+$\beta=0.05$, $d=64$, lr$=5{\times}10^{-3}$ & 0.05 & 64 & 231.90 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+This non-additivity arises from the $\beta$--$d$ coupling: with $\beta=0.7$, $d=64$ outperformed $d=128$ (KL pruning effect); but with $\beta=0.1$ (already weak KL), all 128 dimensions carry genuine information and reducing $d$ simply removes capacity.
+
+\subsubsection{VAE Architecture Comparison.}
+
+\begin{table}[htbp]
+\caption{Optimized VAE architectures compared (DEV, 3 seeds).}\label{tab:vae_arch_compare}
+\centering
+\begin{tabular}{lcccc}
+\toprule
+Model & $\beta$ & lr & Epochs & FID $\downarrow$ \\
+\midrule
+$\beta$-VAE (baseline) & 0.05 & $2{\times}10^{-3}$ & 150 & \textbf{140.22 $\pm$ 1.38} \\
+CVAE & 0.15 & $2{\times}10^{-3}$ & 100 & 151.90 $\pm$ 0.75 \\
+VQ-VAE & — & $5{\times}10^{-3}$ & 100 & 191.18 $\pm$ 2.04 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The $\beta$-VAE achieves the best FID. The CVAE is 11.7 FID points higher, but this gap reflects a capacity trade-off: conditioning partitions the latent space across 10 classes, giving each sub-space effectively $1/10$th of the total capacity. The CVAE's unique advantage — enabling directed generation by artistic style — is not captured by unconditional FID. The slightly higher $\beta=0.15$ (vs.\ 0.1 for the VAE) stabilizes the conditional posterior, allowing slightly stronger KL without collapse.
+
+The VQ-VAE's higher FID is expected given that: (i) uniform random codebook sampling is suboptimal — a PixelCNN or Transformer prior over the discrete codes would be more appropriate~\cite{oord2017}; (ii) 100 epochs may be insufficient for codebook convergence; (iii) the LR was set higher (5e-3) to accelerate codebook updates but may not be optimal for the encoder/decoder pair.
+
+\subsection{Diffusion Model Ablation}\label{sec:ablation_diff}
+
+\begin{table}[htbp]
+\caption{Diffusion model key configurations (DEV unless stated).}\label{tab:diff_ablation}
+\centering
+\begin{tabular}{lcccccc}
+\toprule
+Configuration & $C$ & LR & Sched. & EMA & Dataset & FID $\downarrow$ \\
+\midrule
+\texttt{default\_diff}             & 64 & $2{\times}10^{-4}$ & —      & —      & DEV  & 106.89 \\
+\texttt{diff\_ch96}                & 96 & $2{\times}10^{-4}$ & —      & —      & DEV  & 100.21 \\
+\texttt{diff\_ch96\_cosine}        & 96 & $2{\times}10^{-4}$ & cosine & —      & DEV  & 78.28  \\
+\texttt{diff\_ch96\_cosine\_lr4e4} & 96 & $4{\times}10^{-4}$ & cosine & —      & DEV  & 65.73  \\
+\texttt{diff\_prod\_ddim\_e100}    & 96 & $4{\times}10^{-4}$ & cosine & —      & PROD & 32.17  \\
+\texttt{diff\_ema\_e100}           & 96 & $4{\times}10^{-4}$ & cosine & 0.9999 & PROD & 48.72  \\
+\textbf{\texttt{diff\_ema\_e200}}  & 96 & $4{\times}10^{-4}$ & cosine & 0.9999 & PROD & \textbf{28.97} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Three decisions drove the improvement from FID\,=\,106 to 28.97: (1) Increasing channels to $C=96$ (+5.8M parameters) gained 6.7 FID. (2) \textbf{Cosine LR schedule} was the dominant factor, reducing FID from 193 to 78 on the same model at 100 epochs — in contrast to the VAE where cosine scheduling was harmful at short training horizons. (3) EMA at 100 epochs (FID\,=\,48.72) \emph{underperforms} non-EMA (FID\,=\,32.17) because shadow weights with decay\,=\,0.9999 require $\sim$100\,000 gradient updates to diverge from initialization; at 200 epochs this is satisfied, yielding the best result.
+
+\subsection{GAN Ablation}
+
+Across 35+ configurations, the critical finding was that Spectral Normalization enables long training. Without SN, the discriminator loss collapses to near-zero within 30--50 epochs while generator loss grows unboundedly — discriminator saturation prevents meaningful $G$ gradients. SN enforces the Lipschitz bound, maintaining gradient quality throughout 200 epochs and reducing FID by $\approx$48 points.
+
+\subsection{Quantitative Comparison}
+
+\begin{table}[htbp]
+\caption{Final evaluation — best configuration per model family (PROD, full dataset, 10 seeds).}\label{tab:main_results}
+\centering
+\begin{tabular}{llcc}
+\toprule
+Model & Configuration & FID $\downarrow$ & KID $\downarrow$ \\
+\midrule
+VAE           & $\beta{=}0.05$, $d{=}128$, lr$=2{\times}10^{-3}$, 200 ep & 145.85 $\pm$ 1.27 & 0.1497 \\
+CVAE          & $\beta{=}0.15$, $d{=}128$, lr$=2{\times}10^{-3}$, 100 ep  & 151.90$^\dagger$ & 0.1448$^\dagger$ \\
+VQ-VAE        & $K{=}256$, lr$=5{\times}10^{-3}$, 100 ep                  & 191.18$^\dagger$ & 0.1768$^\dagger$ \\
+DCGAN + SN    & lat$=$100, ngf$=$128, SN, 200 ep                          & $\approx$28.1 & — \\
+Diffusion+EMA & $C{=}96$, cosine lr, 200 ep, EMA, DDIM                    & \textbf{28.97} & \textbf{0.0144} \\
+\bottomrule
+\multicolumn{4}{l}{\small $^\dagger$ DEV evaluation (3 seeds, 2\,000 samples). — = quantitative evaluation pending.} \\
+\end{tabular}
+\end{table}
+
+\subsection{Qualitative Evaluation}
+
+% INSTRUÇÃO: criar a pasta figures/ e copiar as imagens antes de compilar:
+%   mkdir -p figures
+%   cp VAE/vae_beta01/generated_samples.png    figures/vae_samples.png
+%   cp VAE/vae_beta01/latent_interpolation.png figures/vae_interp.png
+%   cp VAE/vae_beta01/reconstructions.png      figures/vae_recon.png
+%   cp results/dcgan_spectral_200ep/generated_samples.png  figures/dcgan_samples.png
+%   cp results/dcgan_spectral_200ep/latent_interpolation.png figures/dcgan_interp.png
+%   (Diffusion + CVAE: exportar dos checkpoints nas máquinas de treino)
+
+Figure~\ref{fig:comparison} shows 64 random samples per best model. The VAE samples exhibit coherent global composition and color palettes but lack high-frequency detail: the MSE loss penalizes pixel-wise deviation from the conditional mean $\mathbb{E}[x|z]$, smoothing fine brushstroke texture. The DCGAN+SN samples are visibly sharper — the adversarial objective drives the generator to match local texture statistics directly. The Diffusion+EMA samples display the highest perceptual richness, with the iterative denoising recovering multi-scale structure that neither the VAE nor the GAN consistently achieves.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{figures/comparison_grid.png}
+\caption{Random samples: (a) $\beta$-VAE ($\beta{=}0.05$, 200ep), (b) DCGAN+SN (200ep), (c) Diffusion+EMA+DDIM (200ep). All trained on full ArtBench-10.}
+\label{fig:comparison}
+\end{figure}
+
+Figure~\ref{fig:interp} shows latent interpolation for the VAE and DCGAN. VAE interpolation is smooth and semantically continuous — a direct consequence of the Gaussian latent space, where linear paths traverse plausible intermediate representations. The CVAE additionally enables style-fixed interpolation: varying the latent vector while holding the class label constant produces smooth intra-style transitions.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{figures/latent_interp.png}
+\caption{Latent interpolation in 10 steps. Top: VAE ($z_0 \to z_1$, $z \sim \mathcal{N}(0,I)$). Bottom: DCGAN. Both exhibit smooth transitions in color, texture, and composition.}
+\label{fig:interp}
+\end{figure}
+
+% ---------------------------------------------------------------
+\section{Discussion}\label{sec:discussion}
+
+\subsection{VAE — Stability at the Cost of Visual Fidelity}
+
+\textbf{Strengths.} The VAE exhibited perfectly stable training across all 45+ experiments. No run diverged or required early stopping, even under extreme configurations ($\beta=2$, lr$=10^{-2}$). The ELBO is a well-defined lower bound on log-likelihood; its optimization does not involve adversarial games or score-matching. Training is fast ($\approx$2h for 150 epochs on the 20\% subset), enabling the extensive search conducted. The Gaussian latent space provides smooth, semantically meaningful interpolation (Figure~\ref{fig:interp}), and the CVAE adds class-conditional generation without architectural complexity.
+
+\textbf{Limitations.} The MSE reconstruction loss structurally produces blurry samples — it minimizes $\mathbb{E}[\|x-\hat{x}\|^2]$, which corresponds to predicting the conditional mean $\mathbb{E}[x|z]$. For artwork where $p(x|z)$ has high variance, this mean prediction is perceptually poor. No hyperparameter choice can overcome this: the 130-point FID gap between the best VAE (145.85) and the best GAN/Diffusion ($\approx$28) is structural, not a tuning failure. Additionally, the $\beta$ sensitivity is extreme: FID varies 150+ points across the tested range, and the notebook default ($\beta=0.7$) was far from optimal. The architectural capacity limit ($\mathrm{FID}_\infty \approx 135$--$140$ for $\approx$1M parameters) would require significantly larger architectures or stronger priors to overcome.
+
+\subsection{GAN — Sample Sharpness at the Cost of Stability}
+
+The GAN family required 35+ configurations to achieve competitive results. Without Spectral Normalization, discriminator saturation prevents convergence beyond 50 epochs, producing mode collapse signatures in training curves (D loss $\to 0$, G loss unbounded). SN was the decisive stabilizer, enabling 200-epoch training and FID\,$\approx$\,28.1 — competitive with the Diffusion model despite a single-pass generator. WGAN-GP provides an alternative Lipschitz constraint but introduces additional hyperparameters ($\lambda$, $n_\text{critic}$); StyleGAN's AdaIN injection is theoretically powerful but constrained at $32{\times}32$ where only three upsampling stages exist.
+
+\subsection{Diffusion — Best Distribution Coverage, Highest Computational Cost}
+
+The Diffusion model achieves the best KID (0.0144) and the highest perceptual quality. The score-matching objective directly learns the data distribution gradient, without the Gaussian prior constraint of the VAE or the adversarial instability of GANs. Key training insights: (1) cosine LR scheduling is essential for long diffusion runs (unlike VAEs); (2) EMA requires 200+ epochs to accumulate sufficient shadow weight divergence; (3) DDIM delivers a 10$\times$ sampling speedup with negligible quality loss at this resolution.
+
+\subsection{DCGAN vs. Diffusion at 32$\times$32}\label{sec:lowres}
+
+The 0.87-point FID difference between the best DCGAN ($\approx$28.1) and Diffusion (28.97) at $32{\times}32$ falls within statistical uncertainty. At low resolution, the many denoising steps of a diffusion model offer diminishing returns — less fine-grained detail to recover across 1000 timesteps than at 256$\times$256. This is consistent with the literature: on CIFAR-10 ($32{\times}32$), competitive GANs and diffusion models achieve similar FID scores. Dhariwal \& Nichol~\cite{dhariwal2021} show diffusion dominance specifically at $64{\times}64$ and above. The result also reflects a search asymmetry: 35+ GAN configurations versus $\approx$22 diffusion runs, with each diffusion run costing 4--10$\times$ more compute.
+
+% ---------------------------------------------------------------
+\section{Conclusion}\label{sec:conclusion}
+
+We conducted a systematic comparison of VAEs, DCGANs, and Diffusion Models on ArtBench-10 at $32{\times}32$ resolution, comprising 80+ training runs. Final results: VAE 145.85, CVAE 151.90, DCGAN+SN $\approx$28.1, Diffusion+EMA 28.97. GAN and diffusion approaches are competitive at this resolution, both outperforming the VAE by a wide margin.
+
+Five key lessons emerge. (1) \textbf{$\beta$ is the most critical VAE hyperparameter}: the optimal $\beta \in [0.05,\,0.1]$ is far below the standard $\beta=1$, reflecting that a single Gaussian prior cannot model 10 multimodal art styles. (2) \textbf{Spectral Normalization is essential for long GAN training}: without it, discriminator saturation prevents convergence beyond 50 epochs. (3) \textbf{Cosine LR scheduling is model-family-dependent}: it was transformative for diffusion (saving 28 FID) but counterproductive for VAEs at $<100$ epochs. (4) \textbf{Dataset scale dominates}: the DEV$\to$PROD transition contributed $\approx$28 FID for the VAE and $\approx$33 for Diffusion in isolation. (5) \textbf{Hyperparameter combinations are non-additive}: the best $\beta$ and best $d$ individually do not combine to produce the best joint result, due to their coupled interaction through the KL normalization.
+
+Promising future directions: (a) LDM~\cite{rombach2022} using the VAE encoder to diffuse in $4{\times}4$ latent space, potentially achieving FID\,$<$\,20; (b) self-attention at the diffusion U-Net bottleneck; (c) cosine noise schedule for diffusion; (d) Classifier-Free Guidance~\cite{ho2020} for class-conditional diffusion; (e) VQ-VAE with autoregressive prior~\cite{oord2017} for proper ancestral sampling; (f) extended diffusion training (300--400 epochs), motivated by consistent FID gains from 100 to 200 epochs with EMA.
+
+% ---------------------------------------------------------------
+\begin{credits}
+\subsubsection{\ackname}
+Claude (Anthropic) was used to support code debugging, hyperparameter search analysis, and report writing assistance. All generated content was reviewed, validated, and adapted by the authors. The implementation builds on PyTorch, \texttt{torchmetrics} for FID/KID, and HuggingFace \texttt{datasets} for ArtBench-10 loading.
+
+\subsubsection{\discintname}
+The authors have no competing interests to declare that are relevant to the content of this article.
+\end{credits}
+
+% ---------------------------------------------------------------
+\begin{thebibliography}{16}
+
+\bibitem{binkowski2018}
+Binkowski, M., Sutherland, D.J., Arbel, M., Gretton, A.:
+Demystifying MMD GANs. In: ICLR (2018)
+
+\bibitem{bowman2016}
+Bowman, S.R., Vilnis, L., Vinyals, O., Dai, A.M., Jozefowicz, R., Bengio, S.:
+Generating sentences from a continuous space. In: CoNLL (2016)
+
+\bibitem{dhariwal2021}
+Dhariwal, P., Nichol, A.: Diffusion models beat GANs on image synthesis.
+In: NeurIPS (2021)
+
+\bibitem{gulrajani2017}
+Gulrajani, I., Ahmed, F., Arjovsky, M., Dumoulin, V., Courville, A.C.:
+Improved training of Wasserstein GANs. In: NeurIPS (2017)
+
+\bibitem{heusel2017}
+Heusel, M., Ramsauer, H., Unterthiner, T., Nessler, B., Hochreiter, S.:
+GANs trained by a two time-scale update rule converge to a local Nash equilibrium.
+In: NeurIPS (2017)
+
+\bibitem{higgins2017}
+Higgins, I., Matthey, L., Pal, A., Burgess, C., Glorot, X., Botvinick, M.,
+Mohamed, S., Lerchner, A.:
+$\beta$-VAE: Learning basic visual concepts with a constrained variational
+framework. In: ICLR (2017)
+
+\bibitem{ho2020}
+Ho, J., Jain, A., Abbeel, P.: Denoising diffusion probabilistic models.
+In: NeurIPS (2020)
+
+\bibitem{karras2018}
+Karras, T., Laine, S., Aila, T.: A style-based generator architecture for
+generative adversarial networks. arXiv:1812.04948 (2018)
+
+\bibitem{kingma2013}
+Kingma, D.P., Welling, M.: Auto-encoding variational Bayes.
+arXiv:1312.6114 (2013)
+
+\bibitem{liao2022}
+Liao, P., Li, X., Liu, X., Keutzer, K.: The ArtBench dataset: Benchmarking
+generative models with artworks. arXiv:2206.11404 (2022)
+
+\bibitem{loshchilov2017}
+Loshchilov, I., Hutter, F.: SGDR: Stochastic gradient descent with warm
+restarts. In: ICLR (2017)
+
+\bibitem{miyato2018}
+Miyato, T., Kataoka, T., Koyama, M., Yoshida, Y.:
+Spectral normalization for generative adversarial networks. In: ICLR (2018)
+
+\bibitem{oord2017}
+van den Oord, A., Vinyals, O., Kavukcuoglu, K.:
+Neural discrete representation learning. In: NeurIPS (2017)
+
+\bibitem{radford2015}
+Radford, A., Metz, L., Chintala, S.: Unsupervised representation learning
+with deep convolutional generative adversarial networks. arXiv:1511.06434 (2015)
+
+\bibitem{rombach2022}
+Rombach, R., Blattmann, A., Lorenz, D., Esser, P., Ommer, B.:
+High-resolution image synthesis with latent diffusion models.
+In: CVPR (2022)
+
+\bibitem{sohn2015}
+Sohn, K., Lee, H., Yan, X.: Learning structured output representation using
+deep conditional generative models. In: NeurIPS (2015)
+
+\bibitem{song2020}
+Song, J., Meng, C., Ermon, S.:
+Denoising diffusion implicit models. arXiv:2010.02502 (2020)
+
+\end{thebibliography}
+
+\end{document}

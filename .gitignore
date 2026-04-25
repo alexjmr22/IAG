@@ -36,8 +36,16 @@ data/
 *.pickle
 
 # Results / generated outputs
-!results/
-!results/**
+results/**
+!results/**/
+!results/**/*.csv
+!results/**/*.json
+!results/**/*.txt
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.zip
 
 # Logs
 *.log
