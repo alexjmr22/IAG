@@ -46,3 +46,25 @@ lightning_logs/
 # IDE
 .vscode/
 .idea/
+
+# Ignore images in results and data folders
+results/**/*.png
+results/**/*.jpg
+results/**/*.jpeg
+DIFF/**/*.png
+DIFF_ate_65fid/**/*.png
+diff_prod_ddim_e100/**/*.png
+data/**/*.png
+data/**/*.jpg
+data/**/*.jpeg
+
+# Allow only metrics and checkpoints in result folders
+!results/**/*.csv
+!results/**/*.pth
+!results/**/*.pt
+!DIFF/**/*.csv
+!DIFF/**/*.pth
+!DIFF/**/*.pt
+!DIFF_ate_65fid/**/*.csv
+!DIFF_ate_65fid/**/*.pth
+!DIFF_ate_65fid/**/*.pt
