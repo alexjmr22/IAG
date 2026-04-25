@@ -32,6 +32,7 @@ if multiprocessing.current_process().name != 'MainProcess':
     sys.stdout = open(os.devnull, 'w')
 
 import numpy as np
+import pandas as pd
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -70,36 +71,44 @@ BATCH_SIZE  = 128    # conforme Notebooks 3, 4, 5
 LR          = float(os.environ.get('DIFF_LR', 2e-4))
 
 from config import cfg
-EPOCHS      = cfg.diffusion_epochs
+EPOCHS      = int(os.environ.get('DIFF_EPOCHS', 50))
 USE_SUBSET  = cfg.use_subset
 
-T_STEPS     = int(os.environ.get('DIFF_T_STEPS', 1000))     # passos de difusão
-BETA_START  = 1e-4
-BETA_END    = 0.02
-SCHEDULE    = os.environ.get('DIFF_SCHEDULE', 'linear')     # 'linear' ou 'cosine'
+T_STEPS      = int(os.environ.get('DIFF_T_STEPS', 1000))     # passos de difusão
+BETA_START   = float(os.environ.get('DIFF_BETA_START', 1e-4))
+BETA_END     = float(os.environ.get('DIFF_BETA_END', 0.02))
+WARMUP_EPOCHS = int(os.environ.get('DIFF_WARMUP_EPOCHS', 5))
 
 EXP_NAME = os.environ.get('EXP_NAME', 'diffusion')
 OUT_DIR = REPO_ROOT / 'results' / EXP_NAME
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
+SAMPLER     = os.environ.get('DIFF_SAMPLER', 'ddpm').lower()   # 'ddpm' or 'ddim'
+DDIM_STEPS  = int(os.environ.get('DIFF_DDIM_STEPS', 100))      # inference steps for DDIM
+
 # ── LOG DE PARÂMETROS (.md) ──────────────────────────────────────────────────
-def save_params():
+import pandas as pd
+def save_params(model_channels):
     params_md = f"""# Diffusion Experiment: {EXP_NAME}
+- **Date**: {pd.Timestamp.now() if 'pd' in globals() else 'N/A'}
 - **T Steps**: {T_STEPS}
 - **Learning Rate**: {LR}
+- **LR Scheduler**: cosine annealing with {WARMUP_EPOCHS}-epoch linear warmup
 - **Epochs**: {EPOCHS}
 - **Batch Size**: {BATCH_SIZE}
 - **Beta Start**: {BETA_START}
 - **Beta End**: {BETA_END}
-- **Channels**: {int(os.environ.get('DIFF_CHANNELS', 64))}
+- **Channels**: {model_channels}
+- **Sampler**: {SAMPLER.upper()}{f' ({DDIM_STEPS} steps)' if SAMPLER == 'ddim' else ''}
 - **Dataset**: {"20% Subset" if USE_SUBSET else "Full ArtBench10"}
+- **Profile**: {cfg.__class__.__name__ if hasattr(cfg, '__class__') else 'N/A'}
 """
     with open(OUT_DIR / "experiment_params.md", "w", encoding="utf-8") as f:
         f.write(params_md)
     print(f"Parâmetros guardados em {OUT_DIR / 'experiment_params.md'}")
 
 OUT_DIR.mkdir(parents=True, exist_ok=True)
-save_params()
+# save_params()  # Moved after _diff_ch is defined
 
 
 # ## 2. Dataset
@@ -218,12 +227,45 @@ class GaussianDiffusion:
             x = self.p_sample(model, x, t, i)
         return x
 
+    @torch.no_grad()
+    def ddim_sample_loop(self, model, shape, ddim_steps=100, eta=0.0):
+        """DDIM deterministic sampling — faster inference with fewer steps."""
+        model.eval()
+        # pick ddim_steps evenly-spaced timesteps in reverse
+        step_size  = self.num_timesteps // ddim_steps
+        timesteps  = list(reversed(range(0, self.num_timesteps, step_size)))[:ddim_steps]
+
+        x = torch.randn(shape).to(self.device)
+        for i, t_cur in enumerate(tqdm(timesteps, desc='DDIM Sampling', leave=False)):
+            t_prev = timesteps[i + 1] if i + 1 < len(timesteps) else -1
+
+            t_batch = torch.full((shape[0],), t_cur, dtype=torch.long, device=self.device)
+            pred_noise = model(x, t_batch)
+
+            a_t  = self.alphas_cumprod[t_cur]
+            a_tp = self.alphas_cumprod[t_prev] if t_prev >= 0 else torch.tensor(1.0, device=self.device)
+
+            # DDIM update (eq. 12 in Song et al. 2020)
+            x0_pred = (x - (1 - a_t).sqrt() * pred_noise) / a_t.sqrt()
+            x0_pred = x0_pred.clamp(-1, 1)
+
+            sigma = eta * ((1 - a_tp) / (1 - a_t)).sqrt() * (1 - a_t / a_tp).sqrt()
+            noise  = torch.randn_like(x) if eta > 0 else torch.zeros_like(x)
+            x = a_tp.sqrt() * x0_pred + (1 - a_tp - sigma**2).clamp(min=0).sqrt() * pred_noise + sigma * noise
+
+        return x
+
     def _get_index(self, tensor, t, x_shape):
         out = tensor.gather(-1, t)
         return out.view(t.shape[0], *((1,) * (len(x_shape) - 1)))
 
 
 schedule = GaussianDiffusion(T_STEPS, BETA_START, BETA_END, device=str(device))
+
+def _sample(model, shape):
+    if SAMPLER == 'ddim':
+        return schedule.ddim_sample_loop(model, shape, ddim_steps=DDIM_STEPS)
+    return schedule.p_sample_loop(model, shape)
 
 # visualizar schedule
 # plt.figure(figsize=(8, 3))
@@ -321,6 +363,7 @@ class PixelUNet(nn.Module):
 
 
 _diff_ch = int(os.environ.get('DIFF_CHANNELS', 64))
+save_params(_diff_ch)
 model = PixelUNet(in_channels=3, model_channels=_diff_ch).to(device)
 print(f'Parâmetros: {sum(p.numel() for p in model.parameters()):,}')
 
@@ -330,9 +373,17 @@ print(f'Parâmetros: {sum(p.numel() for p in model.parameters()):,}')
 # In[6]:
 
 
-def train_diffusion(model, loader, schedule, epochs=100, lr=2e-4):
+def train_diffusion(model, loader, schedule, epochs=100, lr=2e-4, warmup_epochs=5):
     """Treino DDPM: prever ε — baseado em train_diffusion (notebook 5)."""
-    opt     = torch.optim.Adam(model.parameters(), lr=lr)
+    opt = torch.optim.Adam(model.parameters(), lr=lr)
+    # linear warmup nos primeiros warmup_epochs, depois cosine decay até lr_min
+    def lr_lambda(epoch):
+        if epoch < warmup_epochs:
+            return (epoch + 1) / warmup_epochs
+        progress = (epoch - warmup_epochs) / max(epochs - warmup_epochs, 1)
+        return 0.5 * (1.0 + math.cos(math.pi * progress))
+    scheduler = torch.optim.lr_scheduler.LambdaLR(opt, lr_lambda)
+
     history = []
     model.train()
 
@@ -352,21 +403,21 @@ def train_diffusion(model, loader, schedule, epochs=100, lr=2e-4):
             running   += loss.detach()
             n_batches += 1
 
+        scheduler.step()
+        current_lr = scheduler.get_last_lr()[0]
         avg = (running / max(n_batches, 1)).item() if hasattr(running, 'item') else running / max(n_batches, 1)
-        history.append(avg)
-        print(f'Epoch {epoch+1:03d}/{epochs} | loss: {avg:.5f}')
+        history.append({'loss': avg, 'lr': current_lr})
+        print(f'Epoch {epoch+1:03d}/{epochs} | loss: {avg:.5f} | lr: {current_lr:.2e}')
 
         # amostras intermédias
         if cfg.save_samples and (epoch + 1) % 10 == 0:
-            samples = schedule.p_sample_loop(model, shape=(16, 3, IMAGE_SIZE, IMAGE_SIZE))
+            # samples = schedule.p_sample_loop(model, shape=(16, 3, IMAGE_SIZE, IMAGE_SIZE))  # DDPM original
+            samples = _sample(model, shape=(16, 3, IMAGE_SIZE, IMAGE_SIZE))
             imgs    = (samples * 0.5 + 0.5).clamp(0, 1)
             save_image(imgs, OUT_DIR / f'samples_epoch{epoch+1:03d}.png', nrow=4)
             model.train()
 
     return history
-
-
-optimizer = torch.optim.Adam(model.parameters(), lr=LR)
 
 
 # ## 6. Treino
@@ -375,7 +426,7 @@ optimizer = torch.optim.Adam(model.parameters(), lr=LR)
 
 
 if __name__ == '__main__':
-    history = train_diffusion(model, train_loader, schedule, epochs=EPOCHS, lr=LR)
+    history = train_diffusion(model, train_loader, schedule, epochs=EPOCHS, lr=LR, warmup_epochs=WARMUP_EPOCHS)
     torch.save(model.state_dict(), OUT_DIR / 'diffusion_checkpoint.pth')
     print('Checkpoint guardado.')
 
@@ -386,12 +437,18 @@ if __name__ == '__main__':
 
 
 if __name__ == '__main__':
-    plt.figure(figsize=(8, 4))
-    plt.plot(history)
-    plt.title('Diffusion training loss (MSE)'); plt.xlabel('Epoch'); plt.ylabel('Loss')
-    plt.grid(alpha=0.3)
+    fig, axes = plt.subplots(1, 2, figsize=(12, 4))
+    axes[0].plot([h['loss'] for h in history])
+    axes[0].set_title('Diffusion training loss (MSE)')
+    axes[0].set_xlabel('Epoch'); axes[0].set_ylabel('Loss')
+    axes[0].grid(alpha=0.3)
+    axes[1].plot([h['lr'] for h in history])
+    axes[1].set_title('Learning Rate Schedule')
+    axes[1].set_xlabel('Epoch'); axes[1].set_ylabel('LR')
+    axes[1].grid(alpha=0.3)
+    plt.tight_layout()
     plt.savefig(OUT_DIR / 'training_curves.png')
-    # plt.show()
+    plt.close()
 
 
 # ## 8. Amostras geradas — `p_sample_loop` (notebook 5)
@@ -400,16 +457,68 @@ if __name__ == '__main__':
 
 
 if __name__ == '__main__':
-    samples = schedule.p_sample_loop(model, shape=(16, 3, IMAGE_SIZE, IMAGE_SIZE))
-    imgs_   = (samples * 0.5 + 0.5).clamp(0, 1).cpu()
+    # samples = schedule.p_sample_loop(model, shape=(16, 3, IMAGE_SIZE, IMAGE_SIZE))  # DDPM original
+    # ## 8. Amostras geradas — `p_sample_loop` (notebook 5)
+    model.eval()
+    with torch.no_grad():
+        samples = _sample(model, shape=(64, 3, IMAGE_SIZE, IMAGE_SIZE))
+        imgs_   = (samples * 0.5 + 0.5).clamp(0, 1).cpu()
 
-    grid = make_grid(imgs_, nrow=4).permute(1, 2, 0).numpy()
-    plt.figure(figsize=(8, 8))
+    grid = make_grid(imgs_, nrow=8).permute(1, 2, 0).numpy()
+    plt.figure(figsize=(12, 12))
     plt.imshow(grid)
-    plt.title('DDPM — amostras geradas')
+    plt.title(f'{SAMPLER.upper()} — amostras geradas')
     plt.axis('off')
     plt.savefig(OUT_DIR / 'generated_samples.png', bbox_inches='tight')
-    # plt.show()
+    plt.close()
+
+    # ## 9. Reconstruções — forward noise + denoising parcial
+    model.eval()
+    x_real, _ = next(iter(train_loader))
+    x_real = x_real[:8].to(device)
+
+    # Adicionar ruído até t_mid e depois fazer denoise completo (t_mid → 0)
+    t_mid = schedule.num_timesteps // 2
+    with torch.no_grad():
+        t_batch = torch.full((8,), t_mid, dtype=torch.long, device=device)
+        x_noisy = schedule.q_sample(x_real, t_batch)
+        # reverse desde t_mid até 0
+        x_denoised = x_noisy.clone()
+        for i in reversed(range(t_mid)):
+            t_i = torch.full((8,), i, dtype=torch.long, device=device)
+            x_denoised = schedule.p_sample(model, x_denoised, t_i, i)
+
+    def denorm(t): return (t * 0.5 + 0.5).clamp(0, 1).cpu()
+
+    fig, axes = plt.subplots(3, 8, figsize=(16, 6))
+    for i in range(8):
+        axes[0, i].imshow(denorm(x_real[i]).permute(1, 2, 0))
+        axes[1, i].imshow(denorm(x_noisy[i]).permute(1, 2, 0))
+        axes[2, i].imshow(denorm(x_denoised[i]).permute(1, 2, 0))
+        for row in range(3): axes[row, i].axis('off')
+    axes[0, 0].set_ylabel('original', fontsize=9)
+    axes[1, 0].set_ylabel(f'noisy (t={t_mid})', fontsize=9)
+    axes[2, 0].set_ylabel('denoised', fontsize=9)
+    plt.suptitle(f'Diffusion — reconstruções (forward t={t_mid} + reverse)')
+    plt.tight_layout()
+    plt.savefig(OUT_DIR / 'reconstructions.png', bbox_inches='tight')
+    plt.close()
+
+    # ## 10. Progressão ruidosa (Forward Process)
+    x_single = x_real[0:1]
+    steps = [0, T_STEPS//4, T_STEPS//2, 3*T_STEPS//4, T_STEPS-1]
+    fig, axes = plt.subplots(1, len(steps), figsize=(15, 3))
+    with torch.no_grad():
+        for i, t_val in enumerate(steps):
+            t_batch = torch.full((1,), t_val, dtype=torch.long, device=device)
+            x_noisy = schedule.q_sample(x_single, t_batch)
+            axes[i].imshow(denorm(x_noisy[0]).permute(1, 2, 0))
+            axes[i].set_title(f't={t_val}')
+            axes[i].axis('off')
+    plt.suptitle('Diffusion — forward noise progression')
+    plt.savefig(OUT_DIR / 'forward_progression.png', bbox_inches='tight')
+    plt.close()
+    model.train()
 
 
 # ## 9. (Opcional) Latent Diffusion — VAE + Diffusion no espaço latente
