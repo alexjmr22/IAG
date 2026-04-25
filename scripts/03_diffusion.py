@@ -76,6 +76,7 @@ USE_SUBSET  = cfg.use_subset
 T_STEPS     = int(os.environ.get('DIFF_T_STEPS', 1000))     # passos de difusão
 BETA_START  = 1e-4
 BETA_END    = 0.02
+SCHEDULE    = os.environ.get('DIFF_SCHEDULE', 'linear')     # 'linear' ou 'cosine'
 
 EXP_NAME = os.environ.get('EXP_NAME', 'diffusion')
 OUT_DIR = REPO_ROOT / 'results' / EXP_NAME

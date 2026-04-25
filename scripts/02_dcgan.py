@@ -55,6 +55,11 @@ device = get_device()
 print('Device:', device)
 
 
+def _apply_sn(m):
+    if isinstance(m, nn.Conv2d):
+        nn.utils.spectral_norm(m)
+
+
 # ## 1. Hiperparâmetros
 
 # In[ ]:
@@ -68,10 +73,12 @@ NDF         = int(os.environ.get('DCGAN_NDF', 64))     # feature maps Discrimina
 BATCH_SIZE  = 128    # conforme Notebooks 3, 4, 5
 LR_G        = float(os.environ.get('DCGAN_LR_G', os.environ.get('DCGAN_LR', 2e-4)))
 LR_D        = float(os.environ.get('DCGAN_LR_D', os.environ.get('DCGAN_LR', 2e-4)))
-BETA1       = float(os.environ.get('DCGAN_BETA1', 0.5))
+BETA1        = float(os.environ.get('DCGAN_BETA1', 0.5))
+USE_SPECTRAL = os.environ.get('DCGAN_SPECTRAL', '0') == '1'
+USE_COSINE   = os.environ.get('DCGAN_COSINE',   '0') == '1'
 
 from config import cfg
-EPOCHS      = cfg.dcgan_epochs
+EPOCHS      = int(os.environ.get('DCGAN_EPOCHS', cfg.dcgan_epochs))
 USE_SUBSET  = cfg.use_subset
 
 EXP_NAME = os.environ.get('EXP_NAME', 'dcgan')
@@ -196,9 +203,12 @@ def init_dcgan_weights(m):
 
 generator     = DCGenerator(LATENT_DIM, image_channels=3, ngf=NGF).to(device).apply(init_dcgan_weights)
 discriminator = DCDiscriminator(image_channels=3, ndf=NDF).to(device).apply(init_dcgan_weights)
+if USE_SPECTRAL:
+    discriminator.apply(_apply_sn)
 
 print('Generator params    :', sum(p.numel() for p in generator.parameters()))
 print('Discriminator params:', sum(p.numel() for p in discriminator.parameters()))
+print(f'Spectral Norm (D): {USE_SPECTRAL} | Cosine LR: {USE_COSINE}')
 
 
 # ## 4. Loop de treino adversarial — `train_gan` (notebook 4)
@@ -211,6 +221,8 @@ def train_gan(generator, discriminator, loader, latent_dim, epochs=100):
     criterion = nn.BCELoss()
     opt_g = torch.optim.Adam(generator.parameters(),     lr=LR_G, betas=(BETA1, 0.999))
     opt_d = torch.optim.Adam(discriminator.parameters(), lr=LR_D, betas=(BETA1, 0.999))
+    sched_g = torch.optim.lr_scheduler.CosineAnnealingLR(opt_g, T_max=epochs) if USE_COSINE else None
+    sched_d = torch.optim.lr_scheduler.CosineAnnealingLR(opt_d, T_max=epochs) if USE_COSINE else None
 
     history = {'g_loss': [], 'd_loss': []}
     generator.train(); discriminator.train()
@@ -249,6 +261,8 @@ def train_gan(generator, discriminator, loader, latent_dim, epochs=100):
         history['g_loss'].append((g_run / max(n_batches, 1)).item() if hasattr(g_run, 'item') else g_run / max(n_batches, 1))
         history['d_loss'].append((d_run / max(n_batches, 1)).item() if hasattr(d_run, 'item') else d_run / max(n_batches, 1))
         print(f'Epoch {epoch+1:03d}/{epochs} | D loss: {history["d_loss"][-1]:.4f} | G loss: {history["g_loss"][-1]:.4f}')
+        if USE_COSINE:
+            sched_g.step(); sched_d.step()
 
         # amostras intermédias
         if cfg.save_samples and (epoch + 1) % 10 == 0:

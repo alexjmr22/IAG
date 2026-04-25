@@ -82,6 +82,8 @@ CHECKPOINTS = {
     'VAE'      : REPO_ROOT / 'results' / (EXP_NAME if EVAL_TARGET in ['ALL', 'VAE'] and EXP_NAME != 'ALL' else 'vae') / 'vae_checkpoint.pth',
     'DCGAN'    : REPO_ROOT / 'results' / (EXP_NAME if EVAL_TARGET in ['ALL', 'DCGAN'] and EXP_NAME != 'ALL' else 'dcgan') / 'dcgan_checkpoint.pt',
     'Diffusion': REPO_ROOT / 'results' / (EXP_NAME if EVAL_TARGET in ['ALL', 'Diffusion'] and EXP_NAME != 'ALL' else 'diffusion') / 'diffusion_checkpoint.pth',
+    'cDCGAN'   : REPO_ROOT / 'results' / (EXP_NAME if EVAL_TARGET in ['ALL', 'cDCGAN'] and EXP_NAME != 'ALL' else 'cdcgan') / 'cdcgan_checkpoint.pt',
+    'StyleGAN' : REPO_ROOT / 'results' / (EXP_NAME if EVAL_TARGET in ['ALL', 'StyleGAN'] and EXP_NAME != 'ALL' else 'stylegan') / 'dcgan_checkpoint.pt',
 }
 
 OUT_DIR = REPO_ROOT / 'results' / (EXP_NAME if EXP_NAME != 'ALL' else 'evaluation')
@@ -176,6 +178,63 @@ class ConvVAE(nn.Module):
         return self.decode(self.reparameterize(mu, lv)), mu, lv
 
 
+# ── StyleGAN Generator (07_stylegan.py) ──────────────────────────────────────
+class _PixelNorm(nn.Module):
+    def forward(self, x):
+        return x / (x.pow(2).mean(dim=1, keepdim=True) + 1e-8).sqrt()
+
+class _MappingNetwork(nn.Module):
+    def __init__(self, latent_dim, w_dim, n_layers):
+        super().__init__()
+        layers = [_PixelNorm(), nn.Linear(latent_dim, w_dim), nn.LeakyReLU(0.2)]
+        for _ in range(n_layers - 1):
+            layers += [nn.Linear(w_dim, w_dim), nn.LeakyReLU(0.2)]
+        self.net = nn.Sequential(*layers)
+    def forward(self, z): return self.net(z)
+
+class _AdaIN(nn.Module):
+    def forward(self, x, style):
+        B, C, H, W = x.shape
+        gamma = style[:, :C].view(B, C, 1, 1)
+        beta  = style[:, C:].view(B, C, 1, 1)
+        return gamma * F.instance_norm(x) + beta
+
+class _StyleBlock(nn.Module):
+    def __init__(self, in_ch, out_ch, w_dim):
+        super().__init__()
+        self.conv        = nn.Conv2d(in_ch, out_ch, 3, 1, 1, bias=False)
+        self.adain       = _AdaIN()
+        self.style       = nn.Linear(w_dim, 2 * out_ch)
+        self.noise_scale = nn.Parameter(torch.zeros(out_ch, 1, 1))
+        self.act         = nn.LeakyReLU(0.2, inplace=True)
+    def forward(self, x, w):
+        x = self.conv(x)
+        x = x + self.noise_scale * torch.randn(x.size(0), 1, x.size(2), x.size(3), device=x.device)
+        return self.act(self.adain(x, self.style(w)))
+
+class StyleGenerator(nn.Module):
+    def __init__(self, latent_dim=100, w_dim=128, ngf=64, n_map_layers=4, image_channels=3):
+        super().__init__()
+        c = [min(ngf*4, 512), min(ngf*4, 512), min(ngf*2, 256), min(ngf, 128), max(ngf//2, 16)]
+        self.mapping = _MappingNetwork(latent_dim, w_dim, n_map_layers)
+        self.const   = nn.Parameter(torch.randn(1, c[0], 4, 4))
+        self.blocks  = nn.ModuleList([
+            _StyleBlock(c[0], c[0], w_dim), _StyleBlock(c[0], c[1], w_dim),
+            _StyleBlock(c[1], c[2], w_dim), _StyleBlock(c[2], c[2], w_dim),
+            _StyleBlock(c[2], c[3], w_dim), _StyleBlock(c[3], c[3], w_dim),
+            _StyleBlock(c[3], c[4], w_dim), _StyleBlock(c[4], c[4], w_dim),
+        ])
+        self.to_rgb = nn.Sequential(nn.Conv2d(c[4], image_channels, 1), nn.Tanh())
+    def forward(self, z):
+        w = self.mapping(z)
+        x = self.const.expand(z.size(0), -1, -1, -1)
+        for i, block in enumerate(self.blocks):
+            x = block(x, w)
+            if i % 2 == 1 and i < len(self.blocks) - 1:
+                x = F.interpolate(x, scale_factor=2, mode='bilinear', align_corners=False)
+        return self.to_rgb(x)
+
+
 # ── DCGenerator (notebook 02) ─────────────────────────────────────────────────
 class DCGenerator(nn.Module):
     def __init__(self, latent_dim=100, image_channels=3, ngf=64):
@@ -189,6 +248,25 @@ class DCGenerator(nn.Module):
         )
     def forward(self, z):
         return self.net(z.view(z.size(0), self.latent_dim, 1, 1))
+
+
+# ── cDCGenerator (notebook 06) ───────────────────────────────────────────────
+class cDCGenerator(nn.Module):
+    def __init__(self, latent_dim=100, n_classes=10, embed_dim=32, image_channels=3, ngf=64):
+        super().__init__()
+        self.latent_dim = latent_dim
+        self.label_emb  = nn.Embedding(n_classes, embed_dim)
+        in_ch = latent_dim + embed_dim
+        self.net = nn.Sequential(
+            nn.ConvTranspose2d(in_ch,  ngf*4, 4, 1, 0, bias=False), nn.BatchNorm2d(ngf*4), nn.ReLU(True),
+            nn.ConvTranspose2d(ngf*4,  ngf*2, 4, 2, 1, bias=False), nn.BatchNorm2d(ngf*2), nn.ReLU(True),
+            nn.ConvTranspose2d(ngf*2,  ngf,   4, 2, 1, bias=False), nn.BatchNorm2d(ngf),   nn.ReLU(True),
+            nn.ConvTranspose2d(ngf, image_channels, 4, 2, 1, bias=False), nn.Tanh(),
+        )
+    def forward(self, z, labels):
+        emb = self.label_emb(labels)
+        inp = torch.cat([z, emb], dim=1)
+        return self.net(inp.view(inp.size(0), -1, 1, 1))
 
 
 # ── PixelUNet helpers (notebook 03) ───────────────────────────────────────────
@@ -258,6 +336,34 @@ if EVAL_TARGET in ['ALL', 'DCGAN'] and CHECKPOINTS['DCGAN'].exists():
     G_model.eval()
     print('DCGAN Generator carregado')
 
+# ── cDCGAN Generator ──────────────────────────────────────────────────────────
+cdcgan_lat   = int(os.environ.get('DCGAN_LATENT', 100))
+cdcgan_ngf   = int(os.environ.get('DCGAN_NGF', 64))
+cdcgan_embed = int(os.environ.get('CDCGAN_EMBED', 32))
+cG_model = cDCGenerator(cdcgan_lat, 10, cdcgan_embed, 3, cdcgan_ngf).to(device)
+if EVAL_TARGET in ['ALL', 'cDCGAN'] and CHECKPOINTS['cDCGAN'].exists():
+    ckpt_cgan = torch.load(CHECKPOINTS['cDCGAN'], map_location=device, weights_only=False)
+    cG_model.load_state_dict(ckpt_cgan['generator'])
+    cG_model.eval()
+    print('cDCGAN Generator carregado')
+
+# ── StyleGAN Generator ────────────────────────────────────────────────────────
+sgan_lat    = int(os.environ.get('DCGAN_LATENT', 100))
+sgan_w_dim  = int(os.environ.get('STYLEGAN_WDIM', 128))
+sgan_ngf    = int(os.environ.get('DCGAN_NGF', 64))
+sgan_layers = int(os.environ.get('STYLEGAN_MAP_LAYERS', 4))
+sG_model = StyleGenerator(sgan_lat, sgan_w_dim, sgan_ngf, sgan_layers).to(device)
+if EVAL_TARGET in ['ALL', 'StyleGAN'] and CHECKPOINTS['StyleGAN'].exists():
+    ckpt_sg = torch.load(CHECKPOINTS['StyleGAN'], map_location=device, weights_only=False)
+    sG_model.load_state_dict(ckpt_sg['generator'])
+    sG_model.eval()
+    # actualiza params do checkpoint se disponíveis
+    if 'config' in ckpt_sg:
+        cfg_sg = ckpt_sg['config']
+        sgan_lat = cfg_sg.get('latent_dim', sgan_lat)
+        sgan_w_dim = cfg_sg.get('w_dim', sgan_w_dim)
+    print('StyleGAN Generator carregado')
+
 # ── Diffusion ─────────────────────────────────────────────────────────────────
 diff_ch = int(os.environ.get('DIFF_CHANNELS', 64))
 diff_model = PixelUNet(in_channels=3, model_channels=diff_ch).to(device)
@@ -325,6 +431,33 @@ def generate_dcgan(n: int, seed: int) -> torch.Tensor:
         bs   = min(BATCH_SIZE, n - start)
         z    = torch.randn(bs, lat_gan, device=device)
         imgs = (G_model(z) * 0.5 + 0.5).clamp(0, 1)
+        batches.append((imgs.cpu() * 255).to(torch.uint8))
+    return torch.cat(batches)
+
+
+@torch.no_grad()
+def generate_stylegan(n: int, seed: int) -> torch.Tensor:
+    """(N, 3, 32, 32) uint8."""
+    torch.manual_seed(seed)
+    batches = []
+    for start in range(0, n, BATCH_SIZE):
+        bs   = min(BATCH_SIZE, n - start)
+        z    = torch.randn(bs, sgan_lat, device=device)
+        imgs = (sG_model(z) * 0.5 + 0.5).clamp(0, 1)
+        batches.append((imgs.cpu() * 255).to(torch.uint8))
+    return torch.cat(batches)
+
+
+@torch.no_grad()
+def generate_cdcgan(n: int, seed: int) -> torch.Tensor:
+    """(N, 3, 32, 32) uint8 — labels aleatórios uniformes sobre as 10 classes."""
+    torch.manual_seed(seed)
+    batches = []
+    for start in range(0, n, BATCH_SIZE):
+        bs     = min(BATCH_SIZE, n - start)
+        z      = torch.randn(bs, cdcgan_lat, device=device)
+        labels = torch.randint(0, 10, (bs,), device=device)
+        imgs   = (cG_model(z, labels) * 0.5 + 0.5).clamp(0, 1)
         batches.append((imgs.cpu() * 255).to(torch.uint8))
     return torch.cat(batches)
 
@@ -490,6 +623,10 @@ if __name__ == '__main__':
         results.append(evaluate_model('VAE',       generate_vae))
     if EVAL_TARGET in ['ALL', 'DCGAN'] and CHECKPOINTS['DCGAN'].exists():
         results.append(evaluate_model('DCGAN',     generate_dcgan))
+    if EVAL_TARGET in ['ALL', 'cDCGAN'] and CHECKPOINTS['cDCGAN'].exists():
+        results.append(evaluate_model('cDCGAN',    generate_cdcgan))
+    if EVAL_TARGET in ['ALL', 'StyleGAN'] and CHECKPOINTS['StyleGAN'].exists():
+        results.append(evaluate_model('StyleGAN',  generate_stylegan))
     if EVAL_TARGET in ['ALL', 'Diffusion'] and CHECKPOINTS['Diffusion'].exists():
         results.append(evaluate_model('Diffusion', generate_diffusion))
 

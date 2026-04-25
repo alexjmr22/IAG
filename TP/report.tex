@@ -1,0 +1,178 @@
+\documentclass[runningheads]{llncs}
+
+\usepackage[T1]{fontenc}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{amsmath}
+\usepackage{hyperref}
+
+\begin{document}
+
+\title{ArtBench Generative Modeling: A Comparative Study of VAEs, GANs, and Diffusion Models}
+
+%\titlerunning{ArtBench Generative Modeling}
+
+\author{Alexandre Rodrigues\inst{1} \and
+[Nome do Colega]\inst{1}}
+
+\authorrunning{A. Rodrigues et al.}
+
+\institute{Faculdade de Ciências e Tecnologia, Universidade de Coimbra, Portugal\\
+\email{\{[student1], [student2]\}@student.uc.pt}}
+
+\maketitle
+
+% ---------------------------------------------------------------
+\begin{abstract}
+% 150--250 words. Summarize: task (image generation on ArtBench),
+% models compared (VAE, DCGAN, Diffusion), evaluation protocol
+% (FID/KID, 10 seeds), and main finding (which model performs best).
+
+\keywords{Generative Models \and Variational Autoencoders \and GANs \and Diffusion Models \and ArtBench \and FID \and KID}
+\end{abstract}
+
+% ---------------------------------------------------------------
+\section{Introduction}
+% - Context: generative modeling for visual art
+% - Motivation: why ArtBench is a challenging benchmark
+% - Overview of model families explored (VAE, DCGAN, Diffusion)
+% - Structure of the report
+
+% ---------------------------------------------------------------
+\section{Problem Statement}
+% - Task: unconditional image generation on ArtBench-10
+% - Challenges: visual fidelity, diversity, style consistency
+% - Evaluation criteria: qualitative + quantitative (FID, KID)
+% - Development protocol: 20% subset for tuning, full dataset for final model
+
+\subsection{Dataset}
+% - ArtBench-10: 10 artistic styles, 32x32 RGB, 50000 training samples
+% - Cite [7] (Liao et al. 2022)
+% - Brief description of the artistic styles present
+% - Data preprocessing steps (normalization, augmentations if any)
+
+% ---------------------------------------------------------------
+\section{Methodology}
+% - Overview of the three model families and the rationale for choosing them
+
+\subsection{Variational Autoencoder (VAE)}
+% - Background: encoder-decoder with reparameterization trick
+% - Architecture details: number of layers, latent dimension, activation functions
+% - Loss function: ELBO = reconstruction loss + KL divergence
+% - Cite [6] (Kingma & Welling 2013)
+
+\subsection{Deep Convolutional GAN (DCGAN)}
+% - Background: adversarial training, generator vs. discriminator
+% - Architecture details: convolutional layers, BatchNorm, LeakyReLU
+% - Training objective and stability considerations
+% - Cite [8] (Radford et al. 2015)
+
+\subsection{Diffusion Model}
+% - Background: forward noising process, reverse denoising process
+% - Architecture details: U-Net backbone, noise schedule
+% - Sampling procedure (DDPM or DDIM)
+% - Cite [3] (Ho et al. 2020)
+
+\subsection{Additional Models (Extra Work)}
+% - If applicable: WGAN-GP, cDCGAN, StyleGAN, Latent Diffusion, etc.
+% - Motivation for exploring beyond the base requirements
+
+% ---------------------------------------------------------------
+\section{Experimental Setup}
+% - Hardware and software environment (GPU, PyTorch version, etc.)
+% - Random seeds used (list all 10 seeds)
+% - Development phase: 20% subset; final evaluation: full training set
+
+\subsection{Training Configuration}
+% - Shared hyperparameters: batch size, optimizer, learning rate scheduler
+% - Per-model hyperparameters table (epochs, lr, latent dim, beta, etc.)
+% - Reproducibility: fixed seeds, deterministic ops where applicable
+
+\subsection{Evaluation Protocol}
+% - For each model: generate 5000 samples
+% - Sample 5000 real images from ArtBench
+% - FID: computed on full 5000 vs 5000
+% - KID: 50 subsets of size 100; report mean ± std
+% - Full protocol repeated 10 times with different random seeds
+% - Report final: mean ± std of FID and mean ± std of KID
+
+% ---------------------------------------------------------------
+\section{Results}
+
+\subsection{Qualitative Evaluation}
+% - Figure grid: sample outputs from VAE, DCGAN, Diffusion (and extras)
+% - Visual commentary: sharpness, diversity, style coherence per model
+
+\subsection{Quantitative Evaluation}
+% - Table: Model | FID (mean ± std) | KID mean (mean ± std) | KID std (mean ± std)
+% - Statistical comparison across models
+% - Training time / computational cost comparison
+
+\subsection{Discussion}
+% - Trade-offs: VAE (blurry but stable) vs GAN (sharp but unstable) vs Diffusion (quality vs cost)
+% - Impact of training on full dataset vs subset
+% - Connection between model design decisions and observed metric behavior
+% - Failure modes and limitations observed
+
+% ---------------------------------------------------------------
+\section{Conclusion}
+% - Summary of the main findings
+% - Best-performing model and justification
+% - Lessons learned about generative modeling on artistic data
+% - Future work directions
+
+% ---------------------------------------------------------------
+\begin{credits}
+\subsubsection{\discintname}
+The authors have no competing interests to declare. Generative AI tools used during development are acknowledged in the report where applicable.
+\end{credits}
+
+% ---------------------------------------------------------------
+\begin{thebibliography}{10}
+
+\bibitem{dhariwal2021}
+Dhariwal, P., Nichol, A.: Diffusion models beat GANs on image synthesis.
+In: Advances in Neural Information Processing Systems (NeurIPS) (2021)
+
+\bibitem{gulrajani2017}
+Gulrajani, I., Ahmed, F., Arjovsky, M., Dumoulin, V., Courville, A.C.:
+Improved training of Wasserstein GANs.
+In: Advances in Neural Information Processing Systems (NeurIPS) (2017)
+
+\bibitem{ho2020}
+Ho, J., Jain, A., Abbeel, P.: Denoising diffusion probabilistic models.
+In: Advances in Neural Information Processing Systems (NeurIPS) (2020)
+
+\bibitem{karras2020}
+Karras, T., Aittala, M., Laine, S., Härkönen, E., Hellsten, J., Lehtinen, J., Aila, T.:
+Training generative adversarial networks with limited data.
+arXiv preprint arXiv:2006.06676 (2020)
+
+\bibitem{karras2018}
+Karras, T., Laine, S., Aila, T.: A style-based generator architecture for generative adversarial networks.
+arXiv preprint arXiv:1812.04948 (2018)
+
+\bibitem{kingma2013}
+Kingma, D.P., Welling, M.: Auto-encoding variational Bayes.
+arXiv preprint arXiv:1312.6114 (2013)
+
+\bibitem{liao2022}
+Liao, P., Li, X., Liu, X., Keutzer, K.: The ArtBench dataset: Benchmarking generative models with artworks.
+arXiv preprint arXiv:2206.11404 (2022)
+
+\bibitem{radford2015}
+Radford, A., Metz, L., Chintala, S.: Unsupervised representation learning with deep convolutional generative adversarial networks.
+arXiv preprint arXiv:1511.06434 (2015)
+
+\bibitem{rombach2022}
+Rombach, R., Blattmann, A., Lorenz, D., Esser, P., Ommer, B.:
+High-resolution image synthesis with latent diffusion models.
+In: IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) (2022)
+
+\bibitem{sohn2015}
+Sohn, K., Lee, H., Yan, X.: Learning structured output representation using deep conditional generative models.
+arXiv preprint arXiv:1506.05517 (2015)
+
+\end{thebibliography}
+
+\end{document}
