@@ -36,7 +36,8 @@ data/
 *.pickle
 
 # Results / generated outputs
-results/
+!results/
+!results/**
 
 # Logs
 *.log
