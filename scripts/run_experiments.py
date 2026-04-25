@@ -66,6 +66,39 @@ EXPERIMENTS = {
         # Combo v2: T=2000 + beta_low + ch=64 — aposta máxima se ambas as tendências forem positivas
         {'id': 'diff_combo_v2',      'target': 'Diffusion', 'env': {'RUN_PROFILE':'DEV', 'DIFF_T_STEPS': '2000', 'DIFF_CHANNELS': '64', 'DIFF_LR': '2e-4', 'DIFF_BETA_END': '0.01'}},
     ],
+    '7': [ # PC 7 — Diffusion cosine LR scheduler (warmup 5ep + cosine decay)
+        # Replicar top-1 (ch=96) com cosine — baseline para medir ganho do scheduler
+        {'id': 'diff_ch96_cosine',        'target': 'Diffusion', 'env': {'RUN_PROFILE':'DEV', 'DIFF_CHANNELS': '96', 'DIFF_T_STEPS': '1000', 'DIFF_LR': '2e-4', 'DIFF_EPOCHS': '100', 'DIFF_WARMUP_EPOCHS': '5'}},
+        # Replicar top-2 (ch=64) com cosine — ver se o modelo menor também beneficia
+        {'id': 'diff_ch64_cosine',        'target': 'Diffusion', 'env': {'RUN_PROFILE':'DEV', 'DIFF_CHANNELS': '64', 'DIFF_T_STEPS': '1000', 'DIFF_LR': '2e-4', 'DIFF_EPOCHS': '100', 'DIFF_WARMUP_EPOCHS': '5'}},
+        # LR inicial mais alto (4e-4) + cosine: cosine absorve o LR alto na warmup e decai suavemente
+        {'id': 'diff_ch96_cosine_lr4e4',  'target': 'Diffusion', 'env': {'RUN_PROFILE':'DEV', 'DIFF_CHANNELS': '96', 'DIFF_T_STEPS': '1000', 'DIFF_LR': '4e-4', 'DIFF_EPOCHS': '100', 'DIFF_WARMUP_EPOCHS': '5'}},
+    ],
+    '8': [ # PC 8 — PROD final com DDIM (dataset completo, melhor config: ch=96, lr=4e-4, cosine)
+        # PROD 100 épocas: validar se o melhor DEV generaliza para o dataset completo
+        {'id': 'diff_prod_ddim_e100',  'target': 'Diffusion', 'env': {'RUN_PROFILE':'PROD', 'DIFF_CHANNELS': '96', 'DIFF_T_STEPS': '1000', 'DIFF_LR': '4e-4', 'DIFF_EPOCHS': '100', 'DIFF_WARMUP_EPOCHS': '5', 'DIFF_SAMPLER': 'ddim', 'DIFF_DDIM_STEPS': '100'}},
+        # PROD 250 épocas: treino longo para explorar o teto de qualidade no dataset completo
+        # {'id': 'diff_prod_ddim_e200',  'target': 'Diffusion', 'env': {'RUN_PROFILE':'PROD', 'DIFF_CHANNELS': '96', 'DIFF_T_STEPS': '1000', 'DIFF_LR': '4e-4', 'DIFF_EPOCHS': '200', 'DIFF_WARMUP_EPOCHS': '10', 'DIFF_SAMPLER': 'ddim', 'DIFF_DDIM_STEPS': '100'}},
+    ],
+    '9': [ # PC 9 — Diffusion com EMA (melhor config + EMA decay=0.9999)
+        # EMA PROD: replicar melhor config com EMA ativo — espera-se ganho de 1-3 pontos FID
+        {'id': 'diff_ema_e100',        'target': 'DiffusionEMA', 'env': {'RUN_PROFILE':'PROD', 'DIFF_CHANNELS': '96', 'DIFF_T_STEPS': '1000', 'DIFF_LR': '4e-4', 'DIFF_EPOCHS': '100', 'DIFF_WARMUP_EPOCHS': '5', 'DIFF_SAMPLER': 'ddim', 'DIFF_DDIM_STEPS': '100', 'DIFF_EMA_DECAY': '0.9999'}},
+        # EMA 200 épocas: explorar teto de qualidade com EMA no dataset completo
+        #{'id': 'diff_ema_e200',        'target': 'DiffusionEMA', 'env': {'RUN_PROFILE':'PROD', 'DIFF_CHANNELS': '96', 'DIFF_T_STEPS': '1000', 'DIFF_LR': '4e-4', 'DIFF_EPOCHS': '200', 'DIFF_WARMUP_EPOCHS': '10', 'DIFF_SAMPLER': 'ddim', 'DIFF_DDIM_STEPS': '100', 'DIFF_EMA_DECAY': '0.9999'}},
+    ],
+    '6': [ # PC 6 — Diffusion top-2 do test 4 com 100 épocas + ch=112
+        # Top-1 do test 4: ch=96, T=1000, LR=2e-4, beta_end=0.02 (FID 100.2) — agora com 100 épocas
+        {'id': 'diff_ch96_e100',     'target': 'Diffusion', 'env': {'RUN_PROFILE':'DEV', 'DIFF_CHANNELS': '96',  'DIFF_T_STEPS': '1000', 'DIFF_LR': '2e-4', 'DIFF_EPOCHS': '100'}},
+        # Top-2 do test 4: best_combo ch=64, T=1000, LR=2e-4, beta_end=0.02 (FID 107.2) — agora com 100 épocas
+        {'id': 'diff_best_combo_e100','target': 'Diffusion', 'env': {'RUN_PROFILE':'DEV', 'DIFF_CHANNELS': '64',  'DIFF_T_STEPS': '1000', 'DIFF_LR': '2e-4', 'DIFF_EPOCHS': '100'}},
+        # Exploração: ch=112 (ponto entre ch=96 vencedor e ch=128 que piorou no sweep 3)
+        {'id': 'diff_ch112',         'target': 'Diffusion', 'env': {'RUN_PROFILE':'DEV', 'DIFF_CHANNELS': '112', 'DIFF_T_STEPS': '1000', 'DIFF_LR': '2e-4'}},
+    ],
+    '10': [ # PC 10 — DCGAN spectral 200ep (PROD, ngf/ndf=128, dataset completo)
+        {'id': 'dcgan_spectral_200ep', 'target': 'DCGAN', 'env': {
+            'RUN_PROFILE': 'PROD', 'DCGAN_NGF': '128', 'DCGAN_NDF': '128',
+            'DCGAN_EPOCHS': '200', 'DCGAN_SPECTRAL': '1'}},
+    ],
     '5': [ # PC 5 — VAE best-combo + explorações direcionadas pelos sweeps
         # 1. Âncora: melhor beta + melhor latent dim individualmente
         {'id': 'vae_best_combo',   'target': 'VAE', 'env': {'RUN_PROFILE':'DEV', 'VAE_BETA': '0.1', 'VAE_LATENT_DIM': '64',  'VAE_LR': '1e-3'}},
@@ -104,7 +137,7 @@ def run_script(script_path, extra_env):
     _exp_vars = [
         'VAE_LATENT_DIM', 'VAE_BETA', 'VAE_LR',
         'DCGAN_LATENT', 'DCGAN_NGF', 'DCGAN_NDF', 'DCGAN_BETA1', 'DCGAN_LR',
-        'DIFF_CHANNELS', 'DIFF_T_STEPS', 'DIFF_LR', 'DIFF_BETA_START', 'DIFF_BETA_END',
+        'DIFF_CHANNELS', 'DIFF_T_STEPS', 'DIFF_LR', 'DIFF_BETA_START', 'DIFF_BETA_END', 'DIFF_EPOCHS', 'DIFF_WARMUP_EPOCHS',
     ]
     for v in _exp_vars:
         env.pop(v, None)
@@ -123,7 +156,7 @@ def run_script(script_path, extra_env):
 
 def main():
     parser = argparse.ArgumentParser(description="Grid Search Automated Orchestrator")
-    parser.add_argument('--pc', type=str, required=True, choices=['1', '2', '3', '4', '5'], help="ID do Computador (1, 2, 3, 4, ou 5)")
+    parser.add_argument('--pc', type=str, required=True, choices=['1', '2', '3', '4', '5', '6', '7', '8', '9', '10'], help="ID do Computador (1-10) para rodar a bateria de testes correspondente")
     args = parser.parse_args()
 
     pc_experiments = EXPERIMENTS[args.pc]
@@ -150,6 +183,8 @@ def main():
             run_script(root_dir / 'scripts' / '02_dcgan.py', exp_env)
         elif target == 'Diffusion':
             run_script(root_dir / 'scripts' / '03_diffusion.py', exp_env)
+        elif target == 'DiffusionEMA':
+            run_script(root_dir / 'scripts' / '03b_diffusion_ema.py', exp_env)
             
         # Avaliação comum obrigatória logo após qualquer treino (o eval deteta o EVAL_TARGET e a EXP_NAME)
         run_script(root_dir / 'scripts' / '04_evaluation.py', exp_env)
